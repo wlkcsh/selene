@@ -38,11 +38,14 @@ public final class HUDViewModel {
 
     public func handleEvent(_ event: HUDEvent) {
         if let rawState = event.state, let parsed = AgentState(rawValue: rawState) {
+            let previousState = self.agentState
             self.agentState = parsed
             if parsed == .idle {
-                // Keep the final caption visible briefly or reset
                 self.rmsEnergy = 0.0
             } else if parsed == .listening {
+                self.captionText = ""
+            } else if parsed == .speaking && previousState != .speaking {
+                // Clear previous thinking/query text so Selene's response streams cleanly
                 self.captionText = ""
             }
         }
@@ -52,12 +55,12 @@ public final class HUDViewModel {
             self.rmsEnergy = min(1.0, max(0.0, rms * 4.0))
         }
 
-        if let delta = event.text {
-            self.captionText += delta
+        if let caption = event.caption {
+            self.captionText = caption
         }
 
-        if let caption = event.caption, !caption.isEmpty {
-            self.captionText = caption
+        if let delta = event.text {
+            self.captionText += delta
         }
 
         if let app = event.app {

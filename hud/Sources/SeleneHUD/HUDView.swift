@@ -50,9 +50,9 @@ public struct HUDView: View {
 
                 // Streaming Caption or Idle Subtitle
                 if !model.captionText.isEmpty && (model.agentState == .speaking || model.agentState == .thinking) {
-                    Text(model.captionText)
+                    Text(model.agentState == .thinking ? "“\(model.captionText)”" : model.captionText)
                         .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(model.agentState == .thinking ? Color.secondary : Color.primary)
                         .lineLimit(2)
                         .frame(maxWidth: 420, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)

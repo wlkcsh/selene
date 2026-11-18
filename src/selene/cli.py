@@ -386,7 +386,7 @@ async def main(argv: list[str] | None = None) -> None:
             def handle_delta(delta: str) -> None:
                 nonlocal speaking_started
                 if not speaking_started:
-                    post_ipc({"type": "state", "state": "speaking"})
+                    post_ipc({"type": "state", "state": "speaking", "caption": ""})
                     speaking_started = True
                 post_ipc({"type": "delta", "text": delta})
 
