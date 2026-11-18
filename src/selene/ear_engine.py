@@ -1,6 +1,7 @@
 """Push-to-Talk CoreAudio 16kHz recorder, passive Quartz Right-Option tap, chimes, and MLX/Groq STT."""
 
 import asyncio
+import collections
 import io
 import os
 import queue
@@ -78,6 +79,8 @@ class EarEngine:
         self.chimes_enabled = chimes_enabled
         self.is_recording = threading.Event()
         self._frames: list[np.ndarray] = []
+        self._preroll: collections.deque[np.ndarray] = collections.deque(maxlen=5)  # ~160ms pre-roll
+        self._stop_timer: threading.Timer | None = None
         self._lock = threading.Lock()
         self._stt_lock = asyncio.Lock()
         self._utterances: queue.Queue[np.ndarray] = queue.Queue()
@@ -100,8 +103,8 @@ class EarEngine:
             print(f"⚠️  Mic stream unavailable ({err}) — continuing in text-only mode.", flush=True)
 
     def _mic_callback(self, indata: np.ndarray, frames: int, time_info, status) -> None:
+        mono = indata[:, 0].copy()
         if self.is_recording.is_set():
-            mono = indata[:, 0].copy()
             with self._lock:
                 self._frames.append(mono)
             if self.on_rms is not None:
@@ -112,8 +115,15 @@ class EarEngine:
                         self.on_rms(rms)
                     except Exception:
                         pass
+        else:
+            with self._lock:
+                self._preroll.append(mono)
 
     def start_capture(self) -> None:
+        with self._lock:
+            if self._stop_timer is not None:
+                self._stop_timer.cancel()
+                self._stop_timer = None
         if not self.mic_available or self.is_recording.is_set():
             return
         self.on_barge_in()  # Flush GaplessSpeaker & cancel in-flight reply (<20ms)
@@ -125,12 +135,17 @@ class EarEngine:
         if self.chimes_enabled:
             _play_chime(self.cfg.chime_open_sound, volume=self.cfg.chime_open_vol)
         with self._lock:
-            self._frames.clear()
+            self._frames = list(self._preroll)
+            self._preroll.clear()
         self.is_recording.set()
         hint = "release Right Option" if self.global_ptt_active else "press Enter"
         print(f"\n🎙️  [Listening... {hint} to send]", flush=True)
 
     def stop_capture(self) -> None:
+        with self._lock:
+            if self._stop_timer is not None:
+                self._stop_timer.cancel()
+                self._stop_timer = None
         if not self.is_recording.is_set():
             return
         self.is_recording.clear()
@@ -139,6 +154,7 @@ class EarEngine:
                 return
             audio = np.concatenate(self._frames)
             self._frames.clear()
+            self._preroll.clear()
 
         if len(audio) < int(self.cfg.sample_rate * self.cfg.min_audio_sec):
             print("🎙️  [Too short — ignored]", flush=True)
@@ -152,6 +168,15 @@ class EarEngine:
         if self.chimes_enabled:
             _play_chime(self.cfg.chime_close_sound, volume=self.cfg.chime_close_vol)
         self._utterances.put(audio)
+
+    def schedule_stop_capture(self, delay: float = 0.22) -> None:
+        """Schedule stop_capture with a small hangover so ending words are never clipped."""
+        with self._lock:
+            if self._stop_timer is not None:
+                self._stop_timer.cancel()
+            self._stop_timer = threading.Timer(delay, self.stop_capture)
+            self._stop_timer.daemon = True
+            self._stop_timer.start()
 
     def try_get_utterance(self) -> np.ndarray | None:
         """Non-blocking pop of next recorded utterance (returns None if empty)."""
@@ -188,7 +213,7 @@ class EarEngine:
                     if is_down:
                         self.start_capture()
                     else:
-                        self.stop_capture()
+                        self.schedule_stop_capture(delay=0.22)
             return event
 
         def _run_tap() -> None:
@@ -226,6 +251,12 @@ class EarEngine:
 
     async def transcribe(self, audio_f32: np.ndarray) -> str:
         """Transcribe via Groq Whisper if GROQ_API_KEY is set, else local MLX-Whisper."""
+        # Audio normalization: scale quiet audio to 0.6 peak so Whisper receives crisp phonemes
+        if len(audio_f32) > 0:
+            max_val = float(np.max(np.abs(audio_f32)))
+            if 0.001 < max_val < 0.55:
+                audio_f32 = audio_f32 * (0.6 / max_val)
+
         async with self._stt_lock:
             if os.environ.get("GROQ_API_KEY"):
                 try:
@@ -259,6 +290,7 @@ class EarEngine:
                 audio_f32,
                 path_or_hf_repo=self.cfg.whisper_repo,
                 fp16=True,
+                temperature=0.0,
                 initial_prompt=self.cfg.whisper_initial_prompt,
                 condition_on_previous_text=False,
             )
