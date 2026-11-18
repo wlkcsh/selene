@@ -1,6 +1,18 @@
 import AppKit
 import SwiftUI
 
+public final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
+    public var pillFrame: NSRect = .zero
+
+    public override func hitTest(_ point: NSPoint) -> NSView? {
+        // If point is outside the active pill capsule (+4pt margin), return nil so clicks pass through to Cursor/Chrome/Kitty
+        if !pillFrame.isEmpty && !pillFrame.insetBy(dx: -4, dy: -4).contains(point) {
+            return nil
+        }
+        return super.hitTest(point)
+    }
+}
+
 public final class FloatingPanel: NSPanel {
     public init(viewModel: HUDViewModel) {
         super.init(
@@ -28,7 +40,17 @@ public final class FloatingPanel: NSPanel {
         ]
         self.becomesKeyOnlyIfNeeded = true
 
-        let hostingView = NSHostingView(rootView: HUDView(model: viewModel))
+        let hostingView = PassThroughHostingView(rootView: HUDView(model: viewModel))
+        viewModel.onPillFrameChange = { [weak hostingView] frame in
+            guard let hostingView = hostingView else { return }
+            let boundsHeight = hostingView.bounds.height
+            hostingView.pillFrame = NSRect(
+                x: frame.minX,
+                y: boundsHeight - frame.maxY,
+                width: frame.width,
+                height: frame.height
+            )
+        }
         self.contentView = hostingView
 
         self.repositionTopCenter()

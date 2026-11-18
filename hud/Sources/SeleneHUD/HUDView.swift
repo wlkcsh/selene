@@ -1,8 +1,14 @@
 import SwiftUI
 
+public struct PillFrameKey: PreferenceKey {
+    public static var defaultValue: CGRect = .zero
+    public static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
 public struct HUDView: View {
     @Bindable var model: HUDViewModel
-    @State private var isHovered = false
 
     public var body: some View {
         HStack(spacing: 10) {
@@ -68,16 +74,23 @@ public struct HUDView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(
-            Capsule()
+            GeometryReader { geo in
+                Color.clear.preference(key: PillFrameKey.self, value: geo.frame(in: .global))
+            }
+        )
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .overlay(
-                    Capsule()
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.75)
                 )
                 .shadow(color: Color.black.opacity(0.28), radius: 12, x: 0, y: 4)
         )
+        .onPreferenceChange(PillFrameKey.self) { frame in
+            model.onPillFrameChange?(frame)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onHover { isHovered = $0 }
         .animation(.spring(response: 0.35, dampingFraction: 0.78), value: model.agentState)
         .animation(.easeOut(duration: 0.2), value: model.captionText)
     }

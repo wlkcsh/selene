@@ -13,6 +13,7 @@ public final class HUDViewModel {
     public var cardsDue: Int = 0
     public var isMuted: Bool = false
     public var isConnected: Bool = false
+    public var onPillFrameChange: ((CGRect) -> Void)?
 
     private var socketClient: SocketClient?
 
