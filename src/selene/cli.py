@@ -186,8 +186,16 @@ async def main(argv: list[str] | None = None) -> None:
             ipc = None
 
     def post_ipc(payload: dict) -> None:
-        if ipc is not None:
-            asyncio.create_task(ipc.broadcast(payload))
+        if ipc is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            if loop is main_loop and not loop.is_closed():
+                loop.create_task(ipc.broadcast(payload))
+            else:
+                asyncio.run_coroutine_threadsafe(ipc.broadcast(payload), main_loop)
+        except RuntimeError:
+            asyncio.run_coroutine_threadsafe(ipc.broadcast(payload), main_loop)
 
     def handle_barge_in() -> None:
         speaker.interrupt()
