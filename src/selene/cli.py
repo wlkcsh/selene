@@ -39,7 +39,13 @@ from selene.memory_store import MemoryStore  # noqa: E402
 from selene.persona import ensure_api_key, load_persona  # noqa: E402
 from selene.pipeline import speak_once, stream_and_speak  # noqa: E402
 from selene.slash_commands import handle_slash_command  # noqa: E402
+from selene.study_cards import StudyCardStore  # noqa: E402
 from selene.timers import register_reminder_callback  # noqa: E402
+from selene.workspace_context import (  # noqa: E402
+    WorkspaceContext,
+    capture_workspace_context,
+    format_context_prefix,
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -102,21 +108,45 @@ async def wait_for_event(
         await asyncio.sleep(0.01)
 
 
-def _create_chat(client: genai.Client, memory: MemoryStore, tools: list, cfg: SeleneConfig):
-    """Build a Gemini chat session hydrated with pinned facts, rolling summary, and recent turns."""
+def _create_chat(
+    client: genai.Client,
+    memory: MemoryStore,
+    study_cards: StudyCardStore,
+    tools: list,
+    cfg: SeleneConfig,
+):
+    """Build a Gemini chat session hydrated with facts, rolling summary, due cards & recent turns."""
     summary = memory.get_summary()
     facts_block = memory.format_facts_block()
+    due_count = study_cards.due_count()
+    due_hint = study_cards.format_due_summary(limit=3) if due_count > 0 else ""
     history = memory.hydrate_history()
     chat = client.aio.chats.create(
         model=cfg.model_id,
         config=types.GenerateContentConfig(
-            system_instruction=load_persona(summary, facts_block, persona_path=cfg.persona_path),
+            system_instruction=load_persona(
+                summary,
+                facts_block,
+                due_cards_hint=due_hint,
+                persona_path=cfg.persona_path,
+            ),
             temperature=cfg.temperature,
             tools=tools,
         ),
         history=history,
     )
-    return chat, len(history), len(memory.list_facts())
+    return chat, len(history), len(memory.list_facts()), due_count
+
+
+def _format_context_banner(ctx: WorkspaceContext | None) -> str:
+    if ctx is None:
+        return ""
+    label = ctx.app_name
+    if ctx.window_title:
+        label += f" — {ctx.window_title[:60]}"
+    if ctx.selected_text:
+        label += f" (+{len(ctx.selected_text)}ch selection)"
+    return label
 
 
 async def main(argv: list[str] | None = None) -> None:
@@ -136,10 +166,12 @@ async def main(argv: list[str] | None = None) -> None:
     kokoro, rvc = boot_voice_engines(use_index=use_index, cfg=cfg)
     speaker = GaplessSpeaker(rvc.tgt_sr)
     memory = MemoryStore(cfg=cfg)
-    tools = build_jarvis_tools(memory, cfg=cfg)
+    study_cards = StudyCardStore(cfg=cfg)
+    tools = build_jarvis_tools(memory, cfg=cfg, study_cards=study_cards)
 
     main_loop = asyncio.get_running_loop()
     active_turn: dict[str, asyncio.Task | None] = {"task": None}
+    pending_context: dict[str, WorkspaceContext | None] = {"ctx": None}
     reminder_queue: queue.Queue[str] = queue.Queue()
     register_reminder_callback(reminder_queue.put)
 
@@ -149,23 +181,37 @@ async def main(argv: list[str] | None = None) -> None:
         if task is not None and not task.done():
             main_loop.call_soon_threadsafe(task.cancel)
 
-    ear = EarEngine(on_barge_in=handle_barge_in, chimes_enabled=chimes_enabled, cfg=cfg)
+    def handle_capture_start() -> None:
+        if cfg.passive_context_enabled:
+            pending_context["ctx"] = capture_workspace_context(
+                max_selection_chars=cfg.passive_selection_max_chars
+            )
+        else:
+            pending_context["ctx"] = None
+
+    ear = EarEngine(
+        on_barge_in=handle_barge_in,
+        chimes_enabled=chimes_enabled,
+        cfg=cfg,
+        on_capture_start=handle_capture_start,
+    )
     ear.start_ptt_listener()
 
     client = genai.Client()
-    chat, n_hist, n_facts = _create_chat(client, memory, tools, cfg)
+    chat, n_hist, n_facts, n_due = _create_chat(client, memory, study_cards, tools, cfg)
     state = {"muted": False}
 
+    tts_label = getattr(kokoro, "backend_label", "Kokoro")
     mode_str = "Fast Pure .pth" if not use_index else "Full FAISS"
     ptt_str = "Global Right Option" if ear.global_ptt_active else "Enter-Toggle Mic"
     print("\n============================================================")
-    print(f"  💖 Selene Phase 2.5 — Parallel Boot in {time.time() - t_boot:.1f}s")
-    print(f"  🎙️  Ears: {ptt_str} | Voice: {mode_str}")
-    print(f"  🧠 Memory: {n_hist} recent turns | {n_facts} pinned facts")
+    print(f"  💖 Selene Phase 3A — Parallel Boot in {time.time() - t_boot:.1f}s")
+    print(f"  🎙️  Ears: {ptt_str} | Voice: {tts_label} + {mode_str}")
+    print(f"  🧠 Memory: {n_hist} recent turns | {n_facts} pinned facts | 📚 Cards: {n_due} due")
     print("============================================================")
     print("• Hold Right Option (or press Enter on empty line) to speak.")
     print("• Holding Right Option while she talks interrupts immediately.")
-    print("• Type /help for commands (/memory, /config, /mute, /timers, /forget).\n")
+    print("• Type /help for commands (/memory, /cards, /screen, /config, /mute, /timers).\n")
 
     tts_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="kokoro")
     rvc_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="rvc-mps")
@@ -189,13 +235,23 @@ async def main(argv: list[str] | None = None) -> None:
                     await speak_once(msg, kokoro, rvc, speaker, tts_executor, rvc_executor)
                 continue
 
+            image_bytes: bytes | None = None
+            ctx: WorkspaceContext | None = None
+
             if kind == "voice":
                 print("📝 [Transcribing...]", end="\r", flush=True)
                 user_text = await ear.transcribe(payload)
                 print("                    ", end="\r", flush=True)
+                ctx = pending_context.pop("ctx", None)
+                pending_context["ctx"] = None
                 if not user_text:
                     continue
                 print(f"\nYou (Voice): {user_text}")
+                ctx_banner = _format_context_banner(ctx)
+                if ctx_banner:
+                    print(f"📎 [Context: {ctx_banner}]")
+                prompt_to_send = format_context_prefix(ctx) + user_text
+                memory_user_text = user_text
             else:
                 raw = str(payload)
                 if not raw:
@@ -204,6 +260,8 @@ async def main(argv: list[str] | None = None) -> None:
                         await asyncio.to_thread(sys.stdin.readline)
                         ear.stop_capture()
                         utt = ear.try_get_utterance()
+                        ctx = pending_context.pop("ctx", None)
+                        pending_context["ctx"] = None
                         if utt is None:
                             continue
                         print("📝 [Transcribing...]", end="\r", flush=True)
@@ -212,18 +270,32 @@ async def main(argv: list[str] | None = None) -> None:
                         if not user_text:
                             continue
                         print(f"You (Voice): {user_text}")
+                        ctx_banner = _format_context_banner(ctx)
+                        if ctx_banner:
+                            print(f"📎 [Context: {ctx_banner}]")
+                        prompt_to_send = format_context_prefix(ctx) + user_text
+                        memory_user_text = user_text
                     else:
                         continue
                 else:
-                    slash_res = await handle_slash_command(raw, memory, state, ear, client, cfg)
+                    slash_res = await handle_slash_command(
+                        raw, memory, state, ear, client, cfg, study_cards=study_cards
+                    )
                     if slash_res == "reset_chat":
-                        chat, _, _ = _create_chat(client, memory, tools, cfg)
+                        chat, _, _, _ = _create_chat(client, memory, study_cards, tools, cfg)
                         continue
                     if slash_res == "handled":
                         continue
-                    user_text = raw
+                    if isinstance(slash_res, tuple) and slash_res[0] == "screen":
+                        _, user_text, image_bytes = slash_res
+                        prompt_to_send = user_text
+                        memory_user_text = f"[Screen] {user_text}"
+                    else:
+                        user_text = raw
+                        prompt_to_send = raw
+                        memory_user_text = raw
 
-            if user_text.lower() in {"exit", "quit", "goodbye", "bye"}:
+            if image_bytes is None and user_text.lower() in {"exit", "quit", "goodbye", "bye"}:
                 goodbye = (
                     "Take good care of yourself, my sweet darling. "
                     "I'll remember our chat for next time."
@@ -236,13 +308,15 @@ async def main(argv: list[str] | None = None) -> None:
             turn_task = asyncio.create_task(
                 stream_and_speak(
                     chat,
-                    user_text,
+                    prompt_to_send,
                     kokoro,
                     rvc,
                     speaker,
                     tts_executor,
                     rvc_executor,
                     muted=state["muted"],
+                    skip_first_index=cfg.rvc_clause1_skip_index,
+                    image_bytes=image_bytes,
                 )
             )
             active_turn["task"] = turn_task
@@ -250,7 +324,7 @@ async def main(argv: list[str] | None = None) -> None:
             active_turn["task"] = None
 
             if reply:
-                memory.append_turn(user_text, reply)
+                memory.append_turn(memory_user_text, reply)
                 compact_task = asyncio.create_task(memory.maybe_compact(client, cfg.model_id))
                 bg_tasks.add(compact_task)
                 compact_task.add_done_callback(bg_tasks.discard)
@@ -262,6 +336,7 @@ async def main(argv: list[str] | None = None) -> None:
         rvc_executor.shutdown(wait=False)
         ear.close()
         speaker.close()
+        study_cards.close()
         memory.close()
 
 

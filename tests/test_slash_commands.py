@@ -1,10 +1,12 @@
 """Tests for interactive terminal slash commands."""
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from selene.config import SeleneConfig
 from selene.memory_store import MemoryStore
 from selene.slash_commands import handle_slash_command
+from selene.study_cards import StudyCardStore
 
 
 async def test_non_slash_returns_none(memory_store: MemoryStore, isolated_cfg: SeleneConfig):
@@ -62,3 +64,41 @@ async def test_forget_preserves_facts_and_forget_all_wipes_them(
     res_all = await handle_slash_command("/forget all", memory_store, state, None, None, isolated_cfg)
     assert res_all == "reset_chat"
     assert memory_store.list_facts() == []
+
+
+async def test_cards_and_screen_slash_commands(
+    memory_store: MemoryStore,
+    study_cards: StudyCardStore,
+    isolated_cfg: SeleneConfig,
+    capsys,
+):
+    study_cards.add_card("SQL", "What does EXPLAIN ANALYZE show?", "Execution plan & real timings.")
+    state = {"muted": False}
+
+    res = await handle_slash_command(
+        "/cards", memory_store, state, None, None, isolated_cfg, study_cards=study_cards
+    )
+    assert res == "handled"
+    out = capsys.readouterr().out
+    assert "EXPLAIN ANALYZE" in out
+
+    fake_jpeg = b"\xff\xd8\xff\xe0fakejpeg"
+    with patch("selene.slash_commands.capture_screen_jpeg", return_value=fake_jpeg) as mock_cap:
+        screen_res = await handle_slash_command(
+            "/screen Why is this failing?",
+            memory_store,
+            state,
+            None,
+            None,
+            isolated_cfg,
+            study_cards=study_cards,
+        )
+    assert screen_res == ("screen", "Why is this failing?", fake_jpeg)
+    mock_cap.assert_called_once()
+
+    with patch("selene.slash_commands.capture_screen_jpeg", side_effect=RuntimeError("no perm")):
+        err_res = await handle_slash_command(
+            "/screen", memory_store, state, None, None, isolated_cfg, study_cards=study_cards
+        )
+    assert err_res == "handled"
+    assert "Screen capture failed" in capsys.readouterr().out

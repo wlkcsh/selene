@@ -8,11 +8,14 @@ model_id = "gemini-3.5-flash-lite"
 temperature = 0.75
 
 [voice]
+tts_backend = "mlx"  # "mlx" (Apple Silicon Metal) or "pytorch" (CPU fallback)
 kokoro_voice = "af_heart"
 kokoro_speed = 1.0
+kokoro_mlx_repo = "mlx-community/Kokoro-82M-bf16"
 rvc_pitch = 0
 rvc_index_rate = 0.75
 rvc_protect = 0.5
+rvc_clause1_skip_index = true
 applio_resources = "/Applications/Applio.app/Contents/Resources"
 model_workdir = "~/selene/models/custom_voice"
 rvc_model_path = "logs/custom_voice/model.pth"
@@ -28,6 +31,12 @@ chime_open_sound = "Tink"
 chime_open_vol = 0.18
 chime_close_sound = "Pop"
 chime_close_vol = 0.20
+
+[context]
+passive_context_enabled = true
+passive_selection_max_chars = 1500
+screen_vision_max_edge = 1568
+screen_vision_jpeg_quality = 80
 
 [memory]
 window_size = 16

@@ -1,6 +1,6 @@
 # Selene — Custom Anime Voice AI Assistant (macOS)
 
-Selene is a local-first, voice-in / voice-out macOS anime mentor & personal Jarvis assistant powered by **Gemini** (`google-genai`), **Kokoro-82M** (CPU), **RVC v2** (Apple Silicon Metal MPS GPU), **MLX-Whisper** (local Speech-to-Text), and **SQLite** persistent memory.
+Selene is a local-first, voice-in / voice-out macOS anime mentor & personal Jarvis assistant powered by **Gemini** (`google-genai`), **Kokoro-82M** (Apple Silicon MLX or PyTorch CPU), **RVC v2** (Apple Silicon Metal MPS GPU), **MLX-Whisper** (local Speech-to-Text), **Screen Vision**, and **SQLite** persistent memory.
 
 ---
 
@@ -8,11 +8,12 @@ Selene is a local-first, voice-in / voice-out macOS anime mentor & personal Jarv
 
 ```text
 Right Option PTT (Tink/Pop chimes)
+  -> Passive <3ms App & Selection Context (NSWorkspace + AXUIElement)
   -> RMS Silence Gate (>= 0.004)
   -> Pre-warmed MLX-Whisper STT (~0.17s) [or Groq Whisper fallback]
-  -> Gemini 3.5 Flash-Lite + 16 Safe Mac/Memory Tools
-  -> First-Clause Fast-Start Streamer
-  -> Kokoro-82M (CPU, offline-cached) -> Metal RVC v2 (MPS) -> 48kHz Stereo GaplessSpeaker
+  -> Gemini 3.5 Flash-Lite + 20 Safe Mac / Memory / Vision / Card Tools
+  -> First-Clause Fast-Start Streamer (Clause 1 RVC Index-Skip)
+  -> Kokoro-82M (MLX bf16 / CPU) -> Metal RVC v2 (MPS) -> 48kHz Stereo GaplessSpeaker
 ```
 
 ### Package Layout
@@ -20,14 +21,18 @@ Right Option PTT (Tink/Pop chimes)
 * `src/selene/cli.py` — Main event loop, CLI argument parser, and `selene-voice` entrypoint
 * `src/selene/config.py` — Frozen `SeleneConfig` loaded from defaults → `config.toml` → `SELENE_*` env vars
 * `src/selene/ear_engine.py` — Persistent 16 kHz CoreAudio mic, passive Quartz `Right Option` PTT tap, chimes, RMS gate, MLX/Groq STT
-* `src/selene/voice_engine.py` — Offline Kokoro-82M (CPU), Apple Silicon Metal RVC (`.pth` + optional FAISS), 48 kHz `GaplessSpeaker`
+* `src/selene/tts_engine.py` — Apple Silicon MLX Kokoro-82M TTS (~120–220ms first clause) with PyTorch CPU fallback & polyphase resampling
+* `src/selene/voice_engine.py` — Apple Silicon Metal RVC (`.pth` + optional FAISS with Clause 1 skip-index), 48 kHz `GaplessSpeaker`
 * `src/selene/pipeline.py` — First-clause fast-start splitter & two-stage concurrent TTS/RVC streaming pipeline
 * `src/selene/memory_store.py` — Thread-safe SQLite history, rolling compaction, and permanent pinned `facts`
-* `src/selene/mac_tools.py` — 16 safe macOS + Memory Jarvis tools (secret-hardened file reader, frontmost app, clipboard, media, URLs, notes)
+* `src/selene/study_cards.py` — SQLite SM-2 spaced-repetition coding & study cards with review scheduling
+* `src/selene/workspace_context.py` — Passive `<3ms` active macOS app, window title, and highlighted code/text snapshot
+* `src/selene/screen_vision.py` — On-demand silent window/display capture (JPEG <= 1568px) and Gemini multimodal vision
+* `src/selene/mac_tools.py` — 20 safe macOS, Memory, Screen Vision, and Study Card Jarvis tools
 * `src/selene/timers.py` — Spoken study timers + macOS banner notifications
 * `src/selene/web_search.py` — Gemini Google Search grounding with zero-quota DuckDuckGo + Wikipedia fallback
 * `src/selene/persona.py` — `GEMINI.md` persona loader & stage-direction-safe speech cleaner
-* `src/selene/slash_commands.py` — Interactive `/help`, `/memory`, `/timers`, `/config`, `/mute`, `/compact`, `/forget`
+* `src/selene/slash_commands.py` — Interactive `/help`, `/cards`, `/screen`, `/memory`, `/timers`, `/config`, `/mute`, `/compact`, `/forget`
 
 ---
 
@@ -66,6 +71,8 @@ To hold **`Right Option`** from any macOS app (VS Code, Safari, etc.):
 
 ### 5. Interactive Slash Commands
 * `/help` — Show all commands
+* `/cards` — View due spaced-repetition coding/study cards
+* `/screen [q]` — Capture frontmost window and ask Selene about it
 * `/memory` — Inspect pinned facts, rolling summary, and unsummarized message count
 * `/timers` — List active spoken study timers
 * `/config` — View active model, voice, pitch, and paths

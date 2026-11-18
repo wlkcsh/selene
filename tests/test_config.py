@@ -12,6 +12,10 @@ def test_default_config_is_frozen():
     cfg = SeleneConfig()
     assert cfg.model_id == "gemini-3.5-flash-lite"
     assert cfg.kokoro_voice == "af_heart"
+    assert cfg.tts_backend == "mlx"
+    assert cfg.rvc_clause1_skip_index is True
+    assert cfg.passive_context_enabled is True
+    assert cfg.screen_vision_max_edge == 1568
     assert cfg.rvc_pitch == 0
     with pytest.raises(FrozenInstanceError):
         cfg.rvc_pitch = 2  # type: ignore[misc]
@@ -21,21 +25,31 @@ def test_load_config_from_toml_and_env_precedence(tmp_path: Path, monkeypatch):
     toml_path = tmp_path / "custom.toml"
     toml_path.write_text(
         '[llm]\nmodel_id = "gemini-2.5-pro"\ntemperature = 0.5\n'
-        '[voice]\nkokoro_voice = "af_bella"\nrvc_pitch = -2\n'
+        '[voice]\nkokoro_voice = "af_bella"\nrvc_pitch = -2\ntts_backend = "pytorch"\n'
+        'rvc_clause1_skip_index = false\n'
         '[ears]\nmin_rms_energy = 0.01\n'
-        '[memory]\nwindow_size = 20\n',
+        '[memory]\nwindow_size = 20\n'
+        '[context]\npassive_context_enabled = false\npassive_selection_max_chars = 900\n'
+        'screen_vision_max_edge = 1280\nscreen_vision_jpeg_quality = 75\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("SELENE_RVC_PITCH", "3")
     monkeypatch.setenv("SELENE_MODEL_ID", "gemini-3.5-flash")
+    monkeypatch.setenv("SELENE_TTS_BACKEND", "mlx")
 
     cfg = load_config(toml_path)
     assert cfg.model_id == "gemini-3.5-flash"  # env beats TOML
     assert cfg.rvc_pitch == 3  # env beats TOML
+    assert cfg.tts_backend == "mlx"  # env beats TOML
+    assert cfg.rvc_clause1_skip_index is False  # from TOML
     assert cfg.temperature == 0.5  # from TOML
     assert cfg.kokoro_voice == "af_bella"  # from TOML
     assert cfg.min_rms_energy == 0.01  # from TOML
     assert cfg.window_size == 20  # from TOML
+    assert cfg.passive_context_enabled is False  # from TOML
+    assert cfg.passive_selection_max_chars == 900  # from TOML
+    assert cfg.screen_vision_max_edge == 1280  # from TOML
+    assert cfg.screen_vision_jpeg_quality == 75  # from TOML
 
 
 def test_load_config_explicit_missing_file_raises(tmp_path: Path):

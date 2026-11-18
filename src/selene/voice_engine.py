@@ -1,4 +1,4 @@
-"""Local Kokoro-82M (CPU, offline-cached) + Apple Silicon Metal GPU RVC + CoreAudio Speaker."""
+"""Local Kokoro TTS (MLX / CPU) + Apple Silicon Metal GPU RVC + CoreAudio Speaker."""
 
 import concurrent.futures
 import importlib.machinery
@@ -14,10 +14,16 @@ from pathlib import Path
 import faiss  # isort: skip
 import numpy as np
 import sounddevice as sd
-import soxr
 import torch
 
 from selene.config import SeleneConfig
+from selene.tts_engine import (
+    KokoroMLXEngine,
+    KokoroTTSEngine,
+    create_tts_engine,
+    is_kokoro_cached,
+    is_kokoro_mlx_cached,
+)
 
 
 def _register_rvc_namespace(applio_resources: str) -> None:
@@ -37,57 +43,19 @@ def _register_rvc_namespace(applio_resources: str) -> None:
     sys.modules["rvc"] = pkg
 
 
-def is_kokoro_cached() -> bool:
-    """Return True if Kokoro-82M weights exist in local HF cache."""
-    hub = Path.home() / ".cache" / "huggingface" / "hub"
-    return any(hub.glob("models--hexgrad--Kokoro-82M/snapshots/*/kokoro-v1_0.pth"))
-
-
-def enable_offline_hub_if_cached() -> bool:
-    """Lock Hugging Face Hub into instant offline mode once Kokoro weights exist locally."""
-    if is_kokoro_cached():
+def enable_offline_hub_if_cached(cfg: SeleneConfig | None = None) -> bool:
+    """Lock Hugging Face Hub into instant offline mode once selected Kokoro weights are cached."""
+    active_cfg = cfg or SeleneConfig()
+    cached = (
+        is_kokoro_mlx_cached(active_cfg.kokoro_mlx_repo)
+        if active_cfg.tts_backend.strip().lower() == "mlx"
+        else is_kokoro_cached()
+    )
+    if cached:
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
         return True
     return False
-
-
-class KokoroTTSEngine:
-    """100% local Kokoro-82M TTS on CPU -> resampled in RAM to 16kHz float32 for RVC."""
-
-    def __init__(self, cfg: SeleneConfig | None = None):
-        active_cfg = cfg or SeleneConfig()
-        t0 = time.time()
-        print(f"🗣️  Loading local Kokoro-82M ({active_cfg.kokoro_voice}) on CPU...", flush=True)
-
-        if is_kokoro_cached():
-            os.environ.setdefault("HF_HUB_OFFLINE", "1")
-            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-
-        from kokoro import KPipeline
-
-        self.voice = active_cfg.kokoro_voice
-        self.speed = active_cfg.kokoro_speed
-        self.pipeline = KPipeline(lang_code="a", repo_id="hexgrad/Kokoro-82M", device="cpu")
-        self.synthesize_16k("Hello.")
-
-        print(f"✨ Kokoro-82M ready in {time.time() - t0:.2f}s!", flush=True)
-
-    def synthesize_16k(self, text: str) -> np.ndarray | None:
-        """Synthesize text at 24kHz and resample to 16kHz float32 in memory."""
-        if not text.strip():
-            return None
-        chunks: list[np.ndarray] = []
-        for _, _, audio in self.pipeline(text, voice=self.voice, speed=self.speed):
-            if audio is not None and len(audio) > 0:
-                if isinstance(audio, torch.Tensor):
-                    audio = audio.detach().cpu().numpy()
-                chunks.append(np.asarray(audio, dtype=np.float32))
-        if not chunks:
-            return None
-        audio_24k = np.concatenate(chunks)
-        audio_16k = soxr.resample(audio_24k, 24000, 16000, quality="HQ")
-        return np.asarray(audio_16k, dtype=np.float32)
 
 
 class MetalRVCEngine:
@@ -158,12 +126,15 @@ class MetalRVCEngine:
             flush=True,
         )
 
-    def convert_pcm16k(self, audio_16k_float32: np.ndarray) -> np.ndarray:
+    def convert_pcm16k(
+        self, audio_16k_float32: np.ndarray, *, skip_index: bool = False
+    ) -> np.ndarray:
         """Convert 16kHz float32 audio into custom_voice voice at self.tgt_sr (int16)."""
         audio_max = np.abs(audio_16k_float32).max() / 0.95
         if audio_max > 1.0:
             audio_16k_float32 = audio_16k_float32 / audio_max
 
+        use_idx = self.use_index and not skip_index
         with torch.no_grad():
             audio_opt = self.vc.pipeline(
                 model=self.hubert,
@@ -172,8 +143,8 @@ class MetalRVCEngine:
                 audio=audio_16k_float32,
                 pitch=self.cfg_data.rvc_pitch,
                 f0_method="fcpe",
-                file_index=self.cfg_data.rvc_index_path if self.use_index else "",
-                index_rate=self.cfg_data.rvc_index_rate if self.use_index else 0.0,
+                file_index=self.cfg_data.rvc_index_path if use_idx else "",
+                index_rate=self.cfg_data.rvc_index_rate if use_idx else 0.0,
                 pitch_guidance=self.use_f0,
                 volume_envelope=1.0,
                 version=self.version,
@@ -261,23 +232,44 @@ class GaplessSpeaker:
 def boot_voice_engines(
     use_index: bool = True,
     cfg: SeleneConfig | None = None,
-) -> tuple[KokoroTTSEngine, MetalRVCEngine]:
-    """Pre-import lazy Python packages on main thread, then load CPU + MPS models in parallel."""
+) -> tuple[KokoroMLXEngine | KokoroTTSEngine, MetalRVCEngine]:
+    """Pre-import lazy Python packages on main thread, then load TTS + MPS RVC in parallel."""
     active_cfg = cfg or SeleneConfig()
-    enable_offline_hub_if_cached()
+    enable_offline_hub_if_cached(active_cfg)
     os.chdir(str(active_cfg.model_workdir))
     _register_rvc_namespace(active_cfg.applio_resources)
 
     # Pre-import lazy-loading modules on main thread & silence progress bar spam
     import rvc.infer.pipeline  # noqa: F401
-    from kokoro import KPipeline  # noqa: F401
     from rvc.lib.utils import load_embedding  # noqa: F401
     from transformers import HubertModel  # noqa: F401
     from transformers.utils import logging as hf_logging
 
+    if active_cfg.tts_backend.strip().lower() == "mlx":
+        try:
+            import kokoro_mlx  # noqa: F401
+            import mlx.core  # noqa: F401
+        except ImportError:
+            from kokoro import KPipeline  # noqa: F401
+    else:
+        from kokoro import KPipeline  # noqa: F401
+
     hf_logging.disable_progress_bar()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        fut_kokoro = pool.submit(KokoroTTSEngine, active_cfg)
+        fut_kokoro = pool.submit(create_tts_engine, active_cfg)
         fut_rvc = pool.submit(MetalRVCEngine, use_index, active_cfg)
         return fut_kokoro.result(), fut_rvc.result()
+
+
+__all__ = [
+    "GaplessSpeaker",
+    "KokoroMLXEngine",
+    "KokoroTTSEngine",
+    "MetalRVCEngine",
+    "boot_voice_engines",
+    "create_tts_engine",
+    "enable_offline_hub_if_cached",
+    "is_kokoro_cached",
+    "is_kokoro_mlx_cached",
+]

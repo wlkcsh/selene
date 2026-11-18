@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import functools
 import re
 from typing import TYPE_CHECKING
 
 from selene.persona import clean_for_speech
 
 if TYPE_CHECKING:
-    from selene.voice_engine import GaplessSpeaker, KokoroTTSEngine, MetalRVCEngine
+    from selene.voice_engine import (
+        GaplessSpeaker,
+        KokoroMLXEngine,
+        KokoroTTSEngine,
+        MetalRVCEngine,
+    )
 
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?\n])\s+")
 CLAUSE_SPLIT = re.compile(r"(?<=[,;:\u2014])\s+")
@@ -44,7 +50,7 @@ def split_first_clause(text_buffer: str) -> tuple[str | None, str]:
 
 async def speak_once(
     text: str,
-    kokoro: KokoroTTSEngine,
+    kokoro: KokoroMLXEngine | KokoroTTSEngine,
     rvc: MetalRVCEngine,
     speaker: GaplessSpeaker,
     tts_executor: concurrent.futures.ThreadPoolExecutor,
@@ -70,26 +76,29 @@ async def speak_once(
 async def stream_and_speak(
     chat,
     user_text: str,
-    kokoro: KokoroTTSEngine,
+    kokoro: KokoroMLXEngine | KokoroTTSEngine,
     rvc: MetalRVCEngine,
     speaker: GaplessSpeaker,
     tts_executor: concurrent.futures.ThreadPoolExecutor,
     rvc_executor: concurrent.futures.ThreadPoolExecutor,
     muted: bool = False,
+    skip_first_index: bool = True,
+    image_bytes: bytes | None = None,
 ) -> str:
     """Two-stage concurrent pipeline with first-clause fast-start: Gemini -> Kokoro -> RVC -> Speakers."""
     speaker.reset()
-    sentence_queue: asyncio.Queue[str | None] = asyncio.Queue()
-    rvc_queue: asyncio.Queue = asyncio.Queue()
+    sentence_queue: asyncio.Queue[tuple[str, bool] | None] = asyncio.Queue()
+    rvc_queue: asyncio.Queue[tuple[object, bool] | None] = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
     async def tts_worker() -> None:
         while True:
-            sent = await sentence_queue.get()
-            if sent is None or speaker.interrupt_event.is_set():
+            item = await sentence_queue.get()
+            if item is None or speaker.interrupt_event.is_set():
                 sentence_queue.task_done()
                 await rvc_queue.put(None)
                 break
+            sent, is_first = item
             try:
                 cleaned = clean_for_speech(sent)
                 if cleaned:
@@ -97,19 +106,22 @@ async def stream_and_speak(
                         tts_executor, kokoro.synthesize_16k, cleaned
                     )
                     if pcm_16k is not None and not speaker.interrupt_event.is_set():
-                        await rvc_queue.put(pcm_16k)
+                        await rvc_queue.put((pcm_16k, is_first))
             except Exception as err:
                 print(f"\n[TTS warning: {err}]", flush=True)
             sentence_queue.task_done()
 
     async def rvc_worker() -> None:
         while True:
-            pcm_16k = await rvc_queue.get()
-            if pcm_16k is None or speaker.interrupt_event.is_set():
+            item = await rvc_queue.get()
+            if item is None or speaker.interrupt_event.is_set():
                 rvc_queue.task_done()
                 break
+            pcm_16k, is_first = item
             try:
-                pcm_48k = await loop.run_in_executor(rvc_executor, rvc.convert_pcm16k, pcm_16k)
+                skip_idx = bool(is_first and skip_first_index)
+                convert_fn = functools.partial(rvc.convert_pcm16k, skip_index=skip_idx)
+                pcm_48k = await loop.run_in_executor(rvc_executor, convert_fn, pcm_16k)
                 if pcm_48k is not None and not speaker.interrupt_event.is_set():
                     speaker.play_chunk(pcm_48k)
             except Exception as err:
@@ -125,7 +137,17 @@ async def stream_and_speak(
     sent_first_chunk = False
 
     try:
-        response_stream = await chat.send_message_stream(user_text)
+        if image_bytes is not None:
+            from google.genai import types
+
+            stream_input = [
+                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                user_text,
+            ]
+        else:
+            stream_input = user_text
+
+        response_stream = await chat.send_message_stream(stream_input)
         async for chunk in response_stream:
             if speaker.interrupt_event.is_set():
                 print(" [Interrupted]", flush=True)
@@ -146,19 +168,21 @@ async def stream_and_speak(
                 if not sent_first_chunk:
                     first_clause, remainder = split_first_clause(text_buffer)
                     if first_clause:
-                        await sentence_queue.put(first_clause)
+                        await sentence_queue.put((first_clause, True))
                         text_buffer = remainder
                         sent_first_chunk = True
                 if len(text_buffer) >= 20:
                     parts = SENTENCE_SPLIT.split(text_buffer)
                     if len(parts) > 1:
                         for complete_sentence in parts[:-1]:
-                            await sentence_queue.put(complete_sentence)
+                            is_first = not sent_first_chunk
+                            await sentence_queue.put((complete_sentence, is_first))
                             sent_first_chunk = True
                         text_buffer = parts[-1]
 
         if not muted and text_buffer.strip() and not speaker.interrupt_event.is_set():
-            await sentence_queue.put(text_buffer.strip())
+            is_first = not sent_first_chunk
+            await sentence_queue.put((text_buffer.strip(), is_first))
 
         print("\n")
         if not muted and tts_task and rvc_task:

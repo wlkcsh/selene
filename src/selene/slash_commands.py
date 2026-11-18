@@ -2,6 +2,7 @@
 
 from selene.config import SeleneConfig, format_config_summary
 from selene.memory_store import MemoryStore
+from selene.screen_vision import capture_screen_jpeg
 from selene.timers import list_timers
 
 
@@ -12,12 +13,14 @@ async def handle_slash_command(
     ear,
     client,
     cfg: SeleneConfig,
-) -> str | None:
+    study_cards=None,
+) -> str | tuple[str, str, bytes] | None:
     """Process a terminal slash command.
 
     Returns:
       - None if `raw_text` is not a slash command.
       - 'reset_chat' if the caller should recreate the Gemini chat session.
+      - ('screen', question, jpeg_bytes) for /screen multimodal queries.
       - 'handled' otherwise.
     """
     stripped = raw_text.strip()
@@ -26,12 +29,15 @@ async def handle_slash_command(
 
     parts = stripped.split(maxsplit=1)
     cmd = parts[0].lower()
-    arg = parts[1].strip().lower() if len(parts) > 1 else ""
+    raw_arg = parts[1].strip() if len(parts) > 1 else ""
+    arg = raw_arg.lower()
 
     if cmd == "/help":
         print(
             "\n📖 Selene Commands:\n"
             "  /memory       — View pinned facts, rolling summary & recent turn count\n"
+            "  /cards        — View due spaced-repetition coding/study cards\n"
+            "  /screen [q]   — Capture frontmost window and ask Selene about it\n"
             "  /timers       — List active study timers\n"
             "  /config       — Inspect active model, voice, pitch & path settings\n"
             "  /mute         — Toggle quiet text-only mode (mutes voice & chimes)\n"
@@ -41,6 +47,30 @@ async def handle_slash_command(
             "  quit / exit   — Say goodbye and shut down\n"
         )
         return "handled"
+
+    if cmd == "/cards":
+        if study_cards is None:
+            print("\n📚 Study cards are unavailable in this session.\n")
+        else:
+            print(f"\n📚 {study_cards.format_due_summary()}\n")
+        return "handled"
+
+    if cmd == "/screen":
+        question = (
+            raw_arg
+            or "Describe what is on my screen and help with any visible error or task."
+        )
+        try:
+            jpeg_bytes = capture_screen_jpeg(
+                scope="front_window",
+                max_edge=cfg.screen_vision_max_edge,
+                quality=cfg.screen_vision_jpeg_quality,
+            )
+            print("📸 [Captured frontmost window — analyzing...]", flush=True)
+            return ("screen", question, jpeg_bytes)
+        except Exception as err:
+            print(f"\n⚠️  Screen capture failed: {err}\n")
+            return "handled"
 
     if cmd == "/memory":
         facts = memory.list_facts()

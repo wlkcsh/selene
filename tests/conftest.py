@@ -6,6 +6,7 @@ import pytest
 
 from selene.config import SeleneConfig
 from selene.memory_store import MemoryStore
+from selene.study_cards import StudyCardStore
 from selene.timers import clear_all_timers, register_reminder_callback
 
 
@@ -23,6 +24,14 @@ def isolated_cfg(tmp_path: Path) -> SeleneConfig:
 def memory_store(isolated_cfg: SeleneConfig):
     """Provide a fresh SQLite MemoryStore backed by a temporary DB."""
     store = MemoryStore(cfg=isolated_cfg)
+    yield store
+    store.close()
+
+
+@pytest.fixture
+def study_cards(isolated_cfg: SeleneConfig):
+    """Provide a fresh SQLite StudyCardStore backed by the same temporary DB."""
+    store = StudyCardStore(cfg=isolated_cfg)
     yield store
     store.close()
 

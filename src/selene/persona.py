@@ -25,6 +25,7 @@ def ensure_api_key() -> None:
 def load_persona(
     long_term_summary: str = "",
     pinned_facts: str = "",
+    due_cards_hint: str = "",
     persona_path: Path = DEFAULT_PERSONA_PATH,
 ) -> str:
     """Load Selene's master persona instructions plus pinned facts and SQLite rolling memory."""
@@ -49,6 +50,11 @@ def load_persona(
         prompt += f"\n\n[PINNED LONG-TERM FACTS]:\n{pinned_facts.strip()}"
     if long_term_summary.strip():
         prompt += f"\n\n[LONG-TERM MEMORY & STUDY CONTEXT]:\n{long_term_summary.strip()}"
+    if due_cards_hint.strip():
+        prompt += (
+            "\n\n[DUE STUDY CARDS — OFFER A BRIEF 1-QUESTION CHECK-IN IF APPROPRIATE]:\n"
+            f"{due_cards_hint.strip()}"
+        )
     return prompt
 
 

@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from selene.config import SeleneConfig
 from selene.persona import clean_for_speech, ensure_api_key, load_persona
+from selene.screen_vision import inspect_screen as _inspect_screen
 from selene.timers import (
     cancel_timer,
     list_timers,
@@ -208,8 +209,12 @@ def web_search(query: str) -> str:
     return _web_search(query)
 
 
-def build_jarvis_tools(memory, cfg: SeleneConfig | None = None) -> list:
-    """Bind live MemoryStore & config-aware tools alongside stateless macOS Jarvis tools."""
+def build_jarvis_tools(
+    memory,
+    cfg: SeleneConfig | None = None,
+    study_cards=None,
+) -> list:
+    """Bind live MemoryStore, Screen Vision & config-aware tools alongside stateless macOS tools."""
     active_cfg = cfg or SeleneConfig()
 
     def save_note_tool(filename: str, content: str) -> str:
@@ -240,7 +245,16 @@ def build_jarvis_tools(memory, cfg: SeleneConfig | None = None) -> list:
             return f"No past messages matched '{query}'."
         return "\n".join(f"[{ts}] {role}: {content[:200]}" for role, content, ts in hits)
 
-    return [
+    def inspect_screen_tool(
+        question: str = "Describe what is on screen and help with any visible error or task.",
+        scope: str = "front_window",
+    ) -> str:
+        """Capture the user's macOS screen and inspect visible code, errors, or UI with Gemini Vision."""
+        return _inspect_screen(question=question, scope=scope, cfg=active_cfg)
+
+    inspect_screen_tool.__name__ = "inspect_screen"
+
+    tools = [
         get_mac_status,
         open_mac_app,
         list_directory,
@@ -257,7 +271,32 @@ def build_jarvis_tools(memory, cfg: SeleneConfig | None = None) -> list:
         remember_fact,
         forget_fact,
         search_memory,
+        inspect_screen_tool,
     ]
+
+    if study_cards is not None:
+
+        def log_study_card(topic: str, question: str, answer: str) -> str:
+            """Save a new coding or study concept card for spaced-repetition review."""
+            return study_cards.add_card(topic, question, answer)
+
+        def list_due_study_cards() -> str:
+            """List spaced-repetition coding/study cards that are due for review."""
+            due = study_cards.due_cards(limit=5)
+            if not due:
+                return "No study cards are due right now."
+            return "\n".join(
+                f"#{c['id']} [{c['topic']}]: {c['question']} (Answer: {c['answer']})"
+                for c in due
+            )
+
+        def review_study_card(card_id: int, rating: str) -> str:
+            """Record a review rating for a study card (rating: 'again', 'hard', 'good', 'easy')."""
+            return study_cards.review_card(card_id, rating)
+
+        tools.extend([log_study_card, list_due_study_cards, review_study_card])
+
+    return tools
 
 
 __all__ = [

@@ -65,14 +65,29 @@ def test_save_note_clamps_path_traversal(tmp_path: Path):
     assert (tmp_path / "evil.md").read_text(encoding="utf-8") == "hello"
 
 
-def test_build_jarvis_tools_exposes_16_named_tools(
-    memory_store: MemoryStore, isolated_cfg: SeleneConfig
+def test_build_jarvis_tools_exposes_20_named_tools(
+    memory_store: MemoryStore, study_cards, isolated_cfg: SeleneConfig
 ):
-    tools = build_jarvis_tools(memory_store, cfg=isolated_cfg)
-    names = [fn.__name__ for fn in tools]
-    assert len(names) == 16
-    assert "save_note" in names
-    assert "web_search" in names
-    assert "remember_fact" in names
-    assert "forget_fact" in names
-    assert "search_memory" in names
+    tools = build_jarvis_tools(memory_store, cfg=isolated_cfg, study_cards=study_cards)
+    by_name = {fn.__name__: fn for fn in tools}
+    assert len(by_name) == 20
+    for expected in (
+        "save_note",
+        "web_search",
+        "remember_fact",
+        "forget_fact",
+        "search_memory",
+        "inspect_screen",
+        "log_study_card",
+        "list_due_study_cards",
+        "review_study_card",
+    ):
+        assert expected in by_name
+
+    # Exercise study-card tools bound via closure
+    logged = by_name["log_study_card"]("Python", "What is a frozen dataclass?", "Immutable fields.")
+    assert "Logged study card #1" in logged
+    due = by_name["list_due_study_cards"]()
+    assert "#1 [Python]" in due
+    reviewed = by_name["review_study_card"](1, "good")
+    assert "Reviewed card #1" in reviewed

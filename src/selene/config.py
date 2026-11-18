@@ -22,11 +22,14 @@ class SeleneConfig:
     temperature: float = 0.75
 
     # Voice (Kokoro + Metal RVC)
+    tts_backend: str = "mlx"  # "mlx" (Apple Silicon) or "pytorch" (CPU fallback)
     kokoro_voice: str = "af_heart"
     kokoro_speed: float = 1.0
+    kokoro_mlx_repo: str = "mlx-community/Kokoro-82M-bf16"
     rvc_pitch: int = 0
     rvc_index_rate: float = 0.75
     rvc_protect: float = 0.5
+    rvc_clause1_skip_index: bool = True
     applio_resources: str = "/Applications/Applio.app/Contents/Resources"
     model_workdir: Path = Path.home() / "selene" / "models" / "custom_voice"
     rvc_model_path: str = "logs/custom_voice/model.pth"
@@ -42,6 +45,12 @@ class SeleneConfig:
     chime_open_vol: float = 0.18
     chime_close_sound: str = "Pop"
     chime_close_vol: float = 0.20
+
+    # Passive Workspace Context & Screen Vision
+    passive_context_enabled: bool = True
+    passive_selection_max_chars: int = 1500
+    screen_vision_max_edge: int = 1568
+    screen_vision_jpeg_quality: int = 80
 
     # Memory & Paths
     window_size: int = 16
@@ -67,11 +76,14 @@ def _apply_toml(cfg: SeleneConfig, data: dict) -> SeleneConfig:
 
     voice = data.get("voice", {})
     for key, cast in (
+        ("tts_backend", str),
         ("kokoro_voice", str),
         ("kokoro_speed", float),
+        ("kokoro_mlx_repo", str),
         ("rvc_pitch", int),
         ("rvc_index_rate", float),
         ("rvc_protect", float),
+        ("rvc_clause1_skip_index", bool),
         ("applio_resources", str),
         ("model_workdir", _expand_path),
         ("rvc_model_path", str),
@@ -95,6 +107,16 @@ def _apply_toml(cfg: SeleneConfig, data: dict) -> SeleneConfig:
         if key in ears:
             updates[key] = cast(ears[key])
 
+    context = data.get("context", {})
+    for key, cast in (
+        ("passive_context_enabled", bool),
+        ("passive_selection_max_chars", int),
+        ("screen_vision_max_edge", int),
+        ("screen_vision_jpeg_quality", int),
+    ):
+        if key in context:
+            updates[key] = cast(context[key])
+
     memory = data.get("memory", {})
     for key in ("window_size", "compact_threshold", "compact_batch"):
         if key in memory:
@@ -112,9 +134,13 @@ def _apply_env(cfg: SeleneConfig) -> SeleneConfig:
     env_map: list[tuple[str, str, type | object]] = [
         ("SELENE_MODEL_ID", "model_id", str),
         ("SELENE_TEMPERATURE", "temperature", float),
+        ("SELENE_TTS_BACKEND", "tts_backend", str),
         ("SELENE_KOKORO_VOICE", "kokoro_voice", str),
         ("SELENE_KOKORO_SPEED", "kokoro_speed", float),
+        ("SELENE_KOKORO_MLX_REPO", "kokoro_mlx_repo", str),
         ("SELENE_RVC_PITCH", "rvc_pitch", int),
+        ("SELENE_RVC_CLAUSE1_SKIP_INDEX", "rvc_clause1_skip_index", lambda v: v.lower() not in {"0", "false", "no"}),
+        ("SELENE_PASSIVE_CONTEXT", "passive_context_enabled", lambda v: v.lower() not in {"0", "false", "no"}),
         ("SELENE_WHISPER_REPO", "whisper_repo", str),
         ("SELENE_DB_PATH", "db_path", _expand_path),
         ("SELENE_PERSONA_PATH", "persona_path", _expand_path),
@@ -143,12 +169,15 @@ def load_config(config_path: Path | None = None) -> SeleneConfig:
 
 def format_config_summary(cfg: SeleneConfig) -> str:
     """Format a concise human-readable summary of active runtime configuration."""
+    clause1_str = "fast pure .pth" if cfg.rvc_clause1_skip_index else "full index"
+    ctx_str = "on" if cfg.passive_context_enabled else "off"
     return (
         f"  • LLM Model: {cfg.model_id} (temp={cfg.temperature})\n"
-        f"  • Voice: Kokoro '{cfg.kokoro_voice}' (speed={cfg.kokoro_speed}) "
-        f"+ RVC pitch={cfg.rvc_pitch}, index_rate={cfg.rvc_index_rate}\n"
+        f"  • Voice: Kokoro-{cfg.tts_backend.upper()} '{cfg.kokoro_voice}' (speed={cfg.kokoro_speed}) "
+        f"+ RVC pitch={cfg.rvc_pitch}, index_rate={cfg.rvc_index_rate} (clause1={clause1_str})\n"
         f"  • Ears: {cfg.whisper_repo} (RMS gate={cfg.min_rms_energy}, "
         f"chimes={cfg.chime_open_sound}/{cfg.chime_close_sound})\n"
+        f"  • Passive Context: {ctx_str} | Screen Vision: max {cfg.screen_vision_max_edge}px\n"
         f"  • Memory DB: {cfg.db_path} (window={cfg.window_size}, compact>{cfg.compact_threshold})\n"
         f"  • Persona: {cfg.persona_path}"
     )

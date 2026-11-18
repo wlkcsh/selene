@@ -68,9 +68,11 @@ class EarEngine:
         on_barge_in: Callable[[], None],
         chimes_enabled: bool = True,
         cfg: SeleneConfig | None = None,
+        on_capture_start: Callable[[], None] | None = None,
     ):
         self.cfg = cfg or SeleneConfig()
         self.on_barge_in = on_barge_in
+        self.on_capture_start = on_capture_start
         self.chimes_enabled = chimes_enabled
         self.is_recording = threading.Event()
         self._frames: list[np.ndarray] = []
@@ -104,6 +106,11 @@ class EarEngine:
         if not self.mic_available or self.is_recording.is_set():
             return
         self.on_barge_in()  # Flush GaplessSpeaker & cancel in-flight reply (<20ms)
+        if self.on_capture_start is not None:
+            try:
+                self.on_capture_start()
+            except Exception:
+                pass
         if self.chimes_enabled:
             _play_chime(self.cfg.chime_open_sound, volume=self.cfg.chime_open_vol)
         with self._lock:
