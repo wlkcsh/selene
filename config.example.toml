@@ -38,6 +38,10 @@ passive_selection_max_chars = 1500
 screen_vision_max_edge = 1568
 screen_vision_jpeg_quality = 80
 
+[ipc]
+ipc_enabled = true
+socket_path = "/tmp/selene.sock"
+
 [memory]
 window_size = 16
 compact_threshold = 24

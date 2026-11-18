@@ -6,6 +6,7 @@ import asyncio
 import concurrent.futures
 import functools
 import re
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from selene.persona import clean_for_speech
@@ -84,6 +85,7 @@ async def stream_and_speak(
     muted: bool = False,
     skip_first_index: bool = True,
     image_bytes: bytes | None = None,
+    on_delta: Callable[[str], object] | None = None,
 ) -> str:
     """Two-stage concurrent pipeline with first-clause fast-start: Gemini -> Kokoro -> RVC -> Speakers."""
     speaker.reset()
@@ -161,6 +163,13 @@ async def stream_and_speak(
                 print("\nSelene: ", end="", flush=True)
                 printed_header = True
             print(delta, end="", flush=True)
+            if on_delta is not None:
+                try:
+                    res = on_delta(delta)
+                    if asyncio.iscoroutine(res):
+                        await res
+                except Exception:
+                    pass
             text_buffer += delta
             full_reply.append(delta)
 

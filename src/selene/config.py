@@ -52,6 +52,10 @@ class SeleneConfig:
     screen_vision_max_edge: int = 1568
     screen_vision_jpeg_quality: int = 80
 
+    # Native HUD IPC
+    ipc_enabled: bool = True
+    socket_path: Path = Path("/tmp/selene.sock")
+
     # Memory & Paths
     window_size: int = 16
     compact_threshold: int = 24
@@ -117,6 +121,12 @@ def _apply_toml(cfg: SeleneConfig, data: dict) -> SeleneConfig:
         if key in context:
             updates[key] = cast(context[key])
 
+    ipc = data.get("ipc", {})
+    if "ipc_enabled" in ipc:
+        updates["ipc_enabled"] = bool(ipc["ipc_enabled"])
+    if "socket_path" in ipc:
+        updates["socket_path"] = _expand_path(ipc["socket_path"])
+
     memory = data.get("memory", {})
     for key in ("window_size", "compact_threshold", "compact_batch"):
         if key in memory:
@@ -141,6 +151,8 @@ def _apply_env(cfg: SeleneConfig) -> SeleneConfig:
         ("SELENE_RVC_PITCH", "rvc_pitch", int),
         ("SELENE_RVC_CLAUSE1_SKIP_INDEX", "rvc_clause1_skip_index", lambda v: v.lower() not in {"0", "false", "no"}),
         ("SELENE_PASSIVE_CONTEXT", "passive_context_enabled", lambda v: v.lower() not in {"0", "false", "no"}),
+        ("SELENE_IPC_ENABLED", "ipc_enabled", lambda v: v.lower() not in {"0", "false", "no"}),
+        ("SELENE_SOCKET_PATH", "socket_path", _expand_path),
         ("SELENE_WHISPER_REPO", "whisper_repo", str),
         ("SELENE_DB_PATH", "db_path", _expand_path),
         ("SELENE_PERSONA_PATH", "persona_path", _expand_path),

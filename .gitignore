@@ -22,3 +22,8 @@ config.toml
 # Graphify & Antigravity
 graphify-out/
 .agents/
+
+# Swift & Xcode
+.build/
+*.xcodeproj
+*.xcworkspace

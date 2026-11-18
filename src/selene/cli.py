@@ -34,6 +34,7 @@ from google import genai  # noqa: E402
 from google.genai import types  # noqa: E402
 
 from selene.config import SeleneConfig, load_config  # noqa: E402
+from selene.ipc_server import SeleneIPCServer  # noqa: E402
 from selene.mac_tools import build_jarvis_tools  # noqa: E402
 from selene.memory_store import MemoryStore  # noqa: E402
 from selene.persona import ensure_api_key, load_persona  # noqa: E402
@@ -175,11 +176,40 @@ async def main(argv: list[str] | None = None) -> None:
     reminder_queue: queue.Queue[str] = queue.Queue()
     register_reminder_callback(reminder_queue.put)
 
+    ipc: SeleneIPCServer | None = None
+    if cfg.ipc_enabled:
+        ipc = SeleneIPCServer(socket_path=cfg.socket_path)
+        try:
+            await ipc.start()
+        except Exception as err:
+            print(f"⚠️  HUD IPC server unavailable ({err})", flush=True)
+            ipc = None
+
+    def post_ipc(payload: dict) -> None:
+        if ipc is not None:
+            asyncio.create_task(ipc.broadcast(payload))
+
     def handle_barge_in() -> None:
         speaker.interrupt()
         task = active_turn.get("task")
         if task is not None and not task.done():
             main_loop.call_soon_threadsafe(task.cancel)
+        post_ipc({"type": "state", "state": "idle"})
+
+    def handle_hud_command(cmd: dict) -> None:
+        act = cmd.get("cmd")
+        if act == "interrupt":
+            handle_barge_in()
+        elif act == "toggle_mute":
+            state["muted"] = not state.get("muted", False)
+            if ear is not None:
+                ear.chimes_enabled = not state["muted"]
+            status = "ON" if state["muted"] else "OFF"
+            print(f"\n🔇 [HUD] Mute toggled: {status}", flush=True)
+            post_ipc({"type": "state", "state": "idle", "muted": state["muted"]})
+
+    if ipc is not None:
+        ipc.set_command_handler(handle_hud_command)
 
     def handle_capture_start() -> None:
         if cfg.passive_context_enabled:
@@ -188,12 +218,28 @@ async def main(argv: list[str] | None = None) -> None:
             )
         else:
             pending_context["ctx"] = None
+        c = pending_context.get("ctx")
+        post_ipc(
+            {
+                "type": "state",
+                "state": "listening",
+                "app": c.app_name if c else "",
+                "window": c.window_title if c else "",
+                "selection_len": len(c.selected_text) if (c and c.selected_text) else 0,
+                "cards_due": study_cards.due_count(),
+                "muted": state.get("muted", False),
+            }
+        )
+
+    def handle_mic_rms(rms: float) -> None:
+        post_ipc({"type": "rms", "rms": rms})
 
     ear = EarEngine(
         on_barge_in=handle_barge_in,
         chimes_enabled=chimes_enabled,
         cfg=cfg,
         on_capture_start=handle_capture_start,
+        on_rms=handle_mic_rms,
     )
     ear.start_ptt_listener()
 
@@ -305,6 +351,27 @@ async def main(argv: list[str] | None = None) -> None:
                     await speak_once(goodbye, kokoro, rvc, speaker, tts_executor, rvc_executor)
                 break
 
+            post_ipc(
+                {
+                    "type": "state",
+                    "state": "thinking",
+                    "caption": user_text,
+                    "app": ctx.app_name if ctx else "",
+                    "window": ctx.window_title if ctx else "",
+                    "cards_due": study_cards.due_count(),
+                    "muted": state["muted"],
+                }
+            )
+
+            speaking_started = False
+
+            def handle_delta(delta: str) -> None:
+                nonlocal speaking_started
+                if not speaking_started:
+                    post_ipc({"type": "state", "state": "speaking"})
+                    speaking_started = True
+                post_ipc({"type": "delta", "text": delta})
+
             turn_task = asyncio.create_task(
                 stream_and_speak(
                     chat,
@@ -317,11 +384,20 @@ async def main(argv: list[str] | None = None) -> None:
                     muted=state["muted"],
                     skip_first_index=cfg.rvc_clause1_skip_index,
                     image_bytes=image_bytes,
+                    on_delta=handle_delta,
                 )
             )
             active_turn["task"] = turn_task
             reply = await turn_task
             active_turn["task"] = None
+            post_ipc(
+                {
+                    "type": "state",
+                    "state": "idle",
+                    "cards_due": study_cards.due_count(),
+                    "muted": state["muted"],
+                }
+            )
 
             if reply:
                 memory.append_turn(memory_user_text, reply)
@@ -332,6 +408,8 @@ async def main(argv: list[str] | None = None) -> None:
         register_reminder_callback(None)
         for task in bg_tasks:
             task.cancel()
+        if ipc is not None:
+            await ipc.stop()
         tts_executor.shutdown(wait=False)
         rvc_executor.shutdown(wait=False)
         ear.close()

@@ -28,11 +28,13 @@ Right Option PTT (Tink/Pop chimes)
 * `src/selene/study_cards.py` — SQLite SM-2 spaced-repetition coding & study cards with review scheduling
 * `src/selene/workspace_context.py` — Passive `<3ms` active macOS app, window title, and highlighted code/text snapshot
 * `src/selene/screen_vision.py` — On-demand silent window/display capture (JPEG <= 1568px) and Gemini multimodal vision
+* `src/selene/ipc_server.py` — Local Unix Domain Socket (`/tmp/selene.sock`) NDJSON streaming server
 * `src/selene/mac_tools.py` — 20 safe macOS, Memory, Screen Vision, and Study Card Jarvis tools
 * `src/selene/timers.py` — Spoken study timers + macOS banner notifications
 * `src/selene/web_search.py` — Gemini Google Search grounding with zero-quota DuckDuckGo + Wikipedia fallback
 * `src/selene/persona.py` — `GEMINI.md` persona loader & stage-direction-safe speech cleaner
 * `src/selene/slash_commands.py` — Interactive `/help`, `/cards`, `/screen`, `/memory`, `/timers`, `/config`, `/mute`, `/compact`, `/forget`
+* `hud/` — Native Swift 6 SwiftUI + AppKit floating HUD pill (`NSPanel`) and MenuBarExtra (324 KB binary, ~18 MB RAM)
 
 ---
 
@@ -62,6 +64,13 @@ selene-voice
 selene-voice --fast --no-chimes
 selene-voice --fast --config ~/selene/config.toml
 ```
+
+### 4. Launch Native Floating HUD (Optional)
+In another terminal tab (or from Spotlight/Raycast):
+```bash
+./scripts/run_hud.sh
+```
+The frosted glass pill will float top-center over full-screen IDEs and browsers across all Spaces without stealing keyboard focus!
 
 ### 4. Global Eyes-Free Push-to-Talk (`Right Option`)
 To hold **`Right Option`** from any macOS app (VS Code, Safari, etc.):

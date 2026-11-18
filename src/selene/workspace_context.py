@@ -93,8 +93,21 @@ def capture_workspace_context(max_selection_chars: int = 1500) -> WorkspaceConte
             if is_sensitive_context(app_name, window_title):
                 return None
 
-            focused_elem = _ax_attr(ax_app, AS.kAXFocusedUIElementAttribute)
-            raw_sel = _ax_attr(focused_elem, AS.kAXSelectedTextAttribute)
+            # Try system-wide focused element first (reaches inside Electron / Monaco editors)
+            raw_sel = None
+            if hasattr(AS, "AXUIElementCreateSystemWide"):
+                sys_wide = AS.AXUIElementCreateSystemWide()
+                focused_elem = _ax_attr(sys_wide, AS.kAXFocusedUIElementAttribute)
+                if focused_elem is not None:
+                    raw_sel = _ax_attr(focused_elem, AS.kAXSelectedTextAttribute)
+
+            if raw_sel is None:
+                focused_elem = _ax_attr(ax_app, AS.kAXFocusedUIElementAttribute)
+                raw_sel = _ax_attr(focused_elem, AS.kAXSelectedTextAttribute)
+
+            if raw_sel is None and focused_win is not None:
+                raw_sel = _ax_attr(focused_win, AS.kAXSelectedTextAttribute)
+
             if isinstance(raw_sel, str) and raw_sel.strip():
                 limit = max(100, min(4000, int(max_selection_chars)))
                 selected_text = raw_sel.strip()[:limit]

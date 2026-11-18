@@ -69,10 +69,12 @@ class EarEngine:
         chimes_enabled: bool = True,
         cfg: SeleneConfig | None = None,
         on_capture_start: Callable[[], None] | None = None,
+        on_rms: Callable[[float], None] | None = None,
     ):
         self.cfg = cfg or SeleneConfig()
         self.on_barge_in = on_barge_in
         self.on_capture_start = on_capture_start
+        self.on_rms = on_rms
         self.chimes_enabled = chimes_enabled
         self.is_recording = threading.Event()
         self._frames: list[np.ndarray] = []
@@ -99,8 +101,15 @@ class EarEngine:
 
     def _mic_callback(self, indata: np.ndarray, frames: int, time_info, status) -> None:
         if self.is_recording.is_set():
+            mono = indata[:, 0].copy()
             with self._lock:
-                self._frames.append(indata[:, 0].copy())
+                self._frames.append(mono)
+            if self.on_rms is not None:
+                rms = float(np.sqrt(np.mean(np.square(mono, dtype=np.float64))))
+                try:
+                    self.on_rms(rms)
+                except Exception:
+                    pass
 
     def start_capture(self) -> None:
         if not self.mic_available or self.is_recording.is_set():
