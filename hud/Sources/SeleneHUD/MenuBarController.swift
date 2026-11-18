@@ -44,12 +44,36 @@ public final class MenuBarController: NSObject {
         menu.addItem(NSMenuItem.separator())
 
         let hudToggle = NSMenuItem(
-            title: panel.isVisible ? "Hide Floating HUD" : "Show Floating HUD",
+            title: panel.isVisible ? "Hide HUD" : "Show HUD",
             action: #selector(toggleHUD),
             keyEquivalent: "h"
         )
         hudToggle.target = self
         menu.addItem(hudToggle)
+
+        let modeItem = NSMenuItem(title: "Display Mode", action: nil, keyEquivalent: "")
+        let modeSubmenu = NSMenu()
+
+        let notchItem = NSMenuItem(
+            title: "Notch Island",
+            action: #selector(setNotchMode),
+            keyEquivalent: "1"
+        )
+        notchItem.target = self
+        notchItem.state = viewModel.displayMode == .notch ? .on : .off
+
+        let floatItem = NSMenuItem(
+            title: "Floating Pill",
+            action: #selector(setFloatingMode),
+            keyEquivalent: "2"
+        )
+        floatItem.target = self
+        floatItem.state = viewModel.displayMode == .floating ? .on : .off
+
+        modeSubmenu.addItem(notchItem)
+        modeSubmenu.addItem(floatItem)
+        modeItem.submenu = modeSubmenu
+        menu.addItem(modeItem)
 
         let muteTitle = viewModel.isMuted ? "Unmute Voice" : "Mute Voice"
         let muteToggle = NSMenuItem(
@@ -83,6 +107,16 @@ public final class MenuBarController: NSObject {
         } else {
             panel.orderFront(nil)
         }
+        buildMenu()
+    }
+
+    @objc private func setNotchMode() {
+        viewModel.setDisplayMode(.notch)
+        buildMenu()
+    }
+
+    @objc private func setFloatingMode() {
+        viewModel.setDisplayMode(.floating)
         buildMenu()
     }
 

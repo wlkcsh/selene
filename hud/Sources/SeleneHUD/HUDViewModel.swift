@@ -13,11 +13,25 @@ public final class HUDViewModel {
     public var cardsDue: Int = 0
     public var isMuted: Bool = false
     public var isConnected: Bool = false
+    public var displayMode: HUDDisplayMode = .notch {
+        didSet {
+            UserDefaults.standard.set(displayMode.rawValue, forKey: "selene_hud_display_mode")
+            onDisplayModeChange?(displayMode)
+        }
+    }
     public var onPillFrameChange: ((CGRect) -> Void)?
+    public var onDisplayModeChange: ((HUDDisplayMode) -> Void)?
 
     private var socketClient: SocketClient?
 
     public init() {
+        if let saved = UserDefaults.standard.string(forKey: "selene_hud_display_mode"),
+           let mode = HUDDisplayMode(rawValue: saved) {
+            self.displayMode = mode
+        } else {
+            self.displayMode = .notch
+        }
+
         self.socketClient = SocketClient(
             onEvent: { [weak self] event in
                 self?.handleEvent(event)
@@ -86,5 +100,9 @@ public final class HUDViewModel {
 
     public func toggleMute() {
         socketClient?.sendCommand(HUDCommand(cmd: "toggle_mute"))
+    }
+
+    public func setDisplayMode(_ mode: HUDDisplayMode) {
+        self.displayMode = mode
     }
 }

@@ -1,5 +1,10 @@
 import Foundation
 
+public enum HUDDisplayMode: String, Codable, CaseIterable, Sendable {
+    case notch
+    case floating
+}
+
 public enum AgentState: String, Codable, Sendable {
     case idle
     case listening

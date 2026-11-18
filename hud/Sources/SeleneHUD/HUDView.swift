@@ -9,6 +9,15 @@ public struct PillFrameKey: PreferenceKey {
 
 public struct HUDView: View {
     @Bindable var model: HUDViewModel
+    @State private var isInterruptPressed: Bool = false
+
+    private var isNotchMode: Bool {
+        return model.displayMode == .notch && (NSScreen.main?.hasPhysicalNotch ?? false)
+    }
+
+    private var notchHeight: CGFloat {
+        return NSScreen.main?.notchHeight ?? 32.0
+    }
 
     public var body: some View {
         HStack(spacing: 10) {
@@ -44,7 +53,7 @@ public struct HUDView: View {
                     if model.isMuted {
                         Image(systemName: "speaker.slash.fill")
                             .font(.system(size: 9))
-                            .foregroundStyle(.red.opacity(0.8))
+                            .foregroundStyle(.red.opacity(0.85))
                     }
                 }
 
@@ -54,31 +63,87 @@ public struct HUDView: View {
                         .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(model.agentState == .thinking ? Color.secondary : Color.primary)
                         .lineLimit(2)
-                        .frame(maxWidth: 420, alignment: .leading)
+                        .frame(maxWidth: 440, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .transition(
+                            .asymmetric(
+                                insertion: .opacity.combined(with: .offset(y: -4)),
+                                removal: .opacity
+                            )
+                        )
                 }
             }
 
-            // Quick Interrupt Button when speaking
+            // Quick Interrupt Button when speaking with responsive press state
             if model.agentState == .speaking {
                 Button(action: { model.interrupt() }) {
                     Image(systemName: "stop.circle.fill")
                         .font(.system(size: 15))
                         .foregroundStyle(.red.opacity(0.9))
+                        .scaleEffect(isInterruptPressed ? 0.92 : 1.0)
+                        .animation(.spring(response: 0.18, dampingFraction: 0.7), value: isInterruptPressed)
                 }
                 .buttonStyle(.plain)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { _ in isInterruptPressed = true }
+                        .onEnded { _ in isInterruptPressed = false }
+                )
                 .help("Interrupt Selene")
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 16)
+        .padding(.top, isNotchMode ? notchHeight + 6 : 8)
+        .padding(.bottom, 8)
         .background(
             GeometryReader { geo in
                 Color.clear.preference(key: PillFrameKey.self, value: geo.frame(in: .global))
             }
         )
-        .background(
+        .background(backgroundShape)
+        .onPreferenceChange(PillFrameKey.self) { frame in
+            model.onPillFrameChange?(frame)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .animation(.spring(response: 0.36, dampingFraction: 0.82), value: model.agentState)
+        .animation(.spring(response: 0.36, dampingFraction: 0.82), value: model.displayMode)
+        .animation(.easeOut(duration: 0.18), value: model.captionText)
+    }
+
+    @ViewBuilder
+    private var backgroundShape: some View {
+        if isNotchMode {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: 18,
+                bottomTrailingRadius: 18,
+                topTrailingRadius: 0,
+                style: .continuous
+            )
+            .fill(Color.black.opacity(0.88))
+            .background(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 0,
+                    bottomLeadingRadius: 18,
+                    bottomTrailingRadius: 18,
+                    topTrailingRadius: 0,
+                    style: .continuous
+                )
+                .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 0,
+                    bottomLeadingRadius: 18,
+                    bottomTrailingRadius: 18,
+                    topTrailingRadius: 0,
+                    style: .continuous
+                )
+                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.75)
+            )
+            .shadow(color: Color.black.opacity(0.35), radius: 14, x: 0, y: 5)
+        } else {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .overlay(
@@ -86,13 +151,7 @@ public struct HUDView: View {
                         .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.75)
                 )
                 .shadow(color: Color.black.opacity(0.28), radius: 12, x: 0, y: 4)
-        )
-        .onPreferenceChange(PillFrameKey.self) { frame in
-            model.onPillFrameChange?(frame)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .animation(.spring(response: 0.35, dampingFraction: 0.78), value: model.agentState)
-        .animation(.easeOut(duration: 0.2), value: model.captionText)
     }
 
     private var statusTitle: String {

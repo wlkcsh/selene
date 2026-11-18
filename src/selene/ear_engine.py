@@ -37,7 +37,7 @@ def _clear_mlx_cache(mx_mod) -> None:
         mx_mod.metal.clear_cache()
 
 
-def is_whisper_cached(whisper_repo: str = "mlx-community/whisper-base-mlx") -> bool:
+def is_whisper_cached(whisper_repo: str = "mlx-community/whisper-large-v3-turbo") -> bool:
     """Return True if Whisper weights already exist in local HF cache."""
     hub = Path.home() / ".cache" / "huggingface" / "hub"
     repo_dir = f"models--{whisper_repo.replace('/', '--')}"

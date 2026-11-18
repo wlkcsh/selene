@@ -39,7 +39,7 @@ class SeleneConfig:
     sample_rate: int = 16000
     min_audio_sec: float = 0.35
     min_rms_energy: float = 0.0012
-    whisper_repo: str = "mlx-community/whisper-base-mlx"
+    whisper_repo: str = "mlx-community/whisper-large-v3-turbo"
     whisper_initial_prompt: str = DEFAULT_WHISPER_PROMPT
     chime_open_sound: str = "Tink"
     chime_open_vol: float = 0.18
