@@ -14,7 +14,7 @@ rvc_pitch = 0
 rvc_index_rate = 0.75
 rvc_protect = 0.5
 applio_resources = "/Applications/Applio.app/Contents/Resources"
-model_workdir = "~/selene/models/custom_voice/custom_voice"
+model_workdir = "~/selene/models/custom_voice"
 rvc_model_path = "logs/custom_voice/model.pth"
 rvc_index_path = "logs/custom_voice/model.index"
 

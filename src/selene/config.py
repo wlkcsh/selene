@@ -28,7 +28,7 @@ class SeleneConfig:
     rvc_index_rate: float = 0.75
     rvc_protect: float = 0.5
     applio_resources: str = "/Applications/Applio.app/Contents/Resources"
-    model_workdir: Path = Path.home() / "selene" / "models" / "custom_voice" / "custom_voice"
+    model_workdir: Path = Path.home() / "selene" / "models" / "custom_voice"
     rvc_model_path: str = "logs/custom_voice/model.pth"
     rvc_index_path: str = "logs/custom_voice/model.index"
 

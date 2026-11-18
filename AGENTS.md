@@ -5,7 +5,7 @@ Concise architecture map and non-negotiable macOS invariants for working inside 
 ## Project Layout
 * Package source: `src/selene/` (each module strictly cohesive and under ~300 lines)
 * Unit & integration tests: `tests/`
-* Local weights (git-ignored): `models/custom_voice/custom_voice/`
+* Local weights (git-ignored): `models/custom_voice/`
 * Archived Phase 1 script: `archive/selene_phase1.py`
 * External companion files:
   * Persona: `~/.gemini/GEMINI.md`
