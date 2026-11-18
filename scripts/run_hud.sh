@@ -7,10 +7,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 HUD_BIN="${REPO_ROOT}/hud/.build/release/SeleneHUD"
 
-if [[ ! -x "${HUD_BIN}" ]]; then
-    echo "📦 Building SeleneHUD release binary..."
-    (cd "${REPO_ROOT}/hud" && swift build -c release)
-fi
+echo "📦 Ensuring SeleneHUD is up to date..."
+(cd "${REPO_ROOT}/hud" && swift build -c release -q)
 
 echo "✨ Launching Selene HUD..."
 exec "${HUD_BIN}" "$@"
