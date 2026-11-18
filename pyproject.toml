@@ -1,0 +1,71 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "selene"
+version = "2.5.0"
+description = "Voice-in / voice-out macOS anime AI mentor and personal Jarvis assistant"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "google-genai>=1.0.0",
+    "kokoro>=0.8.4",
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+    "sounddevice>=0.5.1",
+    "mlx-whisper",
+    "httpx",
+    "pyobjc-framework-Quartz",
+    "pyobjc-framework-ApplicationServices",
+    "torch",
+    "numpy>=2.0.0",
+    "scipy",
+    "soundfile",
+    "librosa",
+    "faiss-cpu",
+    "transformers",
+    "soxr",
+    "einops",
+    "local-attention",
+    "wget",
+    "torchcrepe",
+    "torchfcpe",
+]
+
+[project.scripts]
+selene-voice = "selene.cli:run"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.9.0",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/selene"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-m 'not integration'"
+markers = [
+    "integration: live Apple Silicon GPU, audio, or network verification tests",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "PIE", "PLW1510"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/selene/cli.py" = ["E402"]
+"tests/test_integration_voice.py" = ["E402"]

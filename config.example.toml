@@ -1,0 +1,40 @@
+# Copy this file to `config.toml` (git-ignored) to override any default Selene setting.
+# You can also override common settings via environment variables:
+#   SELENE_MODEL_ID, SELENE_KOKORO_VOICE, SELENE_KOKORO_SPEED,
+#   SELENE_RVC_PITCH, SELENE_WHISPER_REPO, SELENE_DB_PATH, SELENE_PERSONA_PATH
+
+[llm]
+model_id = "gemini-3.5-flash-lite"
+temperature = 0.75
+
+[voice]
+kokoro_voice = "af_heart"
+kokoro_speed = 1.0
+rvc_pitch = 0
+rvc_index_rate = 0.75
+rvc_protect = 0.5
+applio_resources = "/Applications/Applio.app/Contents/Resources"
+model_workdir = "~/selene/models/custom_voice/custom_voice"
+rvc_model_path = "logs/custom_voice/model.pth"
+rvc_index_path = "logs/custom_voice/model.index"
+
+[ears]
+sample_rate = 16000
+min_audio_sec = 0.35
+min_rms_energy = 0.004
+whisper_repo = "mlx-community/whisper-base-mlx"
+whisper_initial_prompt = "Selene, Ara ara, Jarvis, macOS, Apple Silicon, Python, TypeScript, React, FastAPI, Next.js, Tailwind, pnpm, uv, Git, GitHub, VS Code, Kitty, Kokoro, RVC."
+chime_open_sound = "Tink"
+chime_open_vol = 0.18
+chime_close_sound = "Pop"
+chime_close_vol = 0.20
+
+[memory]
+window_size = 16
+compact_threshold = 24
+compact_batch = 12
+
+[paths]
+persona_path = "~/.gemini/GEMINI.md"
+db_path = "~/.gemini/selene_memory.db"
+notes_dir = "~/selene/notes"

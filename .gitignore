@@ -1,0 +1,20 @@
+# Python & uv
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# Local assets, secrets & personal data
+models/
+notes/
+config.toml
+.env
+.env.*
+*.db
+*.db-journal
+*.db-wal
+.DS_Store

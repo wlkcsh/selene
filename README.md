@@ -1,0 +1,99 @@
+# Selene — Custom Anime Voice AI Assistant (macOS)
+
+Selene is a local-first, voice-in / voice-out macOS anime mentor & personal Jarvis assistant powered by **Gemini** (`google-genai`), **Kokoro-82M** (CPU), **RVC v2** (Apple Silicon Metal MPS GPU), **MLX-Whisper** (local Speech-to-Text), and **SQLite** persistent memory.
+
+---
+
+## Architecture
+
+```text
+Right Option PTT (Tink/Pop chimes)
+  -> RMS Silence Gate (>= 0.004)
+  -> Pre-warmed MLX-Whisper STT (~0.17s) [or Groq Whisper fallback]
+  -> Gemini 3.5 Flash-Lite + 16 Safe Mac/Memory Tools
+  -> First-Clause Fast-Start Streamer
+  -> Kokoro-82M (CPU, offline-cached) -> Metal RVC v2 (MPS) -> 48kHz Stereo GaplessSpeaker
+```
+
+### Package Layout
+
+* `src/selene/cli.py` — Main event loop, CLI argument parser, and `selene-voice` entrypoint
+* `src/selene/config.py` — Frozen `SeleneConfig` loaded from defaults → `config.toml` → `SELENE_*` env vars
+* `src/selene/ear_engine.py` — Persistent 16 kHz CoreAudio mic, passive Quartz `Right Option` PTT tap, chimes, RMS gate, MLX/Groq STT
+* `src/selene/voice_engine.py` — Offline Kokoro-82M (CPU), Apple Silicon Metal RVC (`.pth` + optional FAISS), 48 kHz `GaplessSpeaker`
+* `src/selene/pipeline.py` — First-clause fast-start splitter & two-stage concurrent TTS/RVC streaming pipeline
+* `src/selene/memory_store.py` — Thread-safe SQLite history, rolling compaction, and permanent pinned `facts`
+* `src/selene/mac_tools.py` — 16 safe macOS + Memory Jarvis tools (secret-hardened file reader, frontmost app, clipboard, media, URLs, notes)
+* `src/selene/timers.py` — Spoken study timers + macOS banner notifications
+* `src/selene/web_search.py` — Gemini Google Search grounding with zero-quota DuckDuckGo + Wikipedia fallback
+* `src/selene/persona.py` — `GEMINI.md` persona loader & stage-direction-safe speech cleaner
+* `src/selene/slash_commands.py` — Interactive `/help`, `/memory`, `/timers`, `/config`, `/mute`, `/compact`, `/forget`
+
+---
+
+## Setup & Usage
+
+### 1. Prerequisites
+* Apple Silicon Mac (macOS) with `uv` installed and Python 3.12 (pinned in `.python-version`)
+* `GEMINI_API_KEY` set in your shell environment or `~/.zshrc`
+* Read-only RVC library installed at `/Applications/Applio.app`
+* custom_voice RVC weights placed under `~/selene/models/custom_voice/custom_voice/`
+
+### 2. Install Dependencies
+```bash
+cd ~/selene
+uv sync
+```
+
+### 3. Launch Selene
+```bash
+# Fast mode (pure .pth — ~8.5s parallel boot, lowest latency)
+selene-voice --fast
+
+# Full FAISS voice fidelity
+selene-voice
+
+# Optional flags
+selene-voice --fast --no-chimes
+selene-voice --fast --config ~/selene/config.toml
+```
+
+### 4. Global Eyes-Free Push-to-Talk (`Right Option`)
+To hold **`Right Option`** from any macOS app (VS Code, Safari, etc.):
+1. Open **System Settings → Privacy & Security → Accessibility**.
+2. Enable your terminal app (Kitty, Terminal, or iTerm2).
+3. If Accessibility isn't granted, Selene automatically falls back to **`Enter`-toggle mic mode** (press `Enter` on an empty line to start/stop recording).
+
+### 5. Interactive Slash Commands
+* `/help` — Show all commands
+* `/memory` — Inspect pinned facts, rolling summary, and unsummarized message count
+* `/timers` — List active spoken study timers
+* `/config` — View active model, voice, pitch, and paths
+* `/mute` — Toggle quiet text-only mode (mutes voice & PTT chimes)
+* `/compact` — Compact recent turns into long-term summary immediately
+* `/forget` — Wipe chat history & summary while keeping pinned facts (`/forget all` wipes everything)
+
+---
+
+## Customizing Configuration
+
+Copy `config.example.toml` to `config.toml` (git-ignored) and edit any section (`[llm]`, `[voice]`, `[ears]`, `[memory]`, `[paths]`), or pass environment overrides like:
+
+```bash
+SELENE_RVC_PITCH=2 selene-voice --fast
+```
+
+---
+
+## Development & Testing
+
+```bash
+# Fast offline unit tests (< 1s)
+uv run pytest -v
+
+# Linting
+uv run ruff check src tests
+
+# Live GPU + Kokoro + Metal RVC + MLX-Whisper integration test
+uv run pytest -m integration -v -s
+```
