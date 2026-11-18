@@ -105,11 +105,13 @@ class EarEngine:
             with self._lock:
                 self._frames.append(mono)
             if self.on_rms is not None:
-                rms = float(np.sqrt(np.mean(np.square(mono, dtype=np.float64))))
-                try:
-                    self.on_rms(rms)
-                except Exception:
-                    pass
+                self._rms_counter = getattr(self, "_rms_counter", 0) + 1
+                if self._rms_counter % 2 == 0:
+                    rms = float(np.sqrt(np.mean(np.square(mono, dtype=np.float64))))
+                    try:
+                        self.on_rms(rms)
+                    except Exception:
+                        pass
 
     def start_capture(self) -> None:
         if not self.mic_available or self.is_recording.is_set():
@@ -144,7 +146,7 @@ class EarEngine:
 
         rms = float(np.sqrt(np.mean(np.square(audio, dtype=np.float64))))
         if rms < self.cfg.min_rms_energy:
-            print("🎙️  [Silence — ignored]", flush=True)
+            print(f"🎙️  [Silence — ignored (RMS {rms:.5f} < {self.cfg.min_rms_energy})]", flush=True)
             return
 
         if self.chimes_enabled:

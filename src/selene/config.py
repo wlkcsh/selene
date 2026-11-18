@@ -38,7 +38,7 @@ class SeleneConfig:
     # Ears (CoreAudio + Quartz PTT + STT)
     sample_rate: int = 16000
     min_audio_sec: float = 0.35
-    min_rms_energy: float = 0.004
+    min_rms_energy: float = 0.0012
     whisper_repo: str = "mlx-community/whisper-base-mlx"
     whisper_initial_prompt: str = DEFAULT_WHISPER_PROMPT
     chime_open_sound: str = "Tink"

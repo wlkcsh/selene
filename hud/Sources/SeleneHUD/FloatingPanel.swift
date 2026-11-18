@@ -4,7 +4,7 @@ import SwiftUI
 public final class FloatingPanel: NSPanel {
     public init(viewModel: HUDViewModel) {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 240, height: 44),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 80),
             styleMask: [
                 .nonactivatingPanel,
                 .titled,

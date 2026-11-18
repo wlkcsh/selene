@@ -14,6 +14,7 @@ import asyncio
 import concurrent.futures
 import logging
 import queue
+import re
 import select
 import sys
 import time
@@ -104,7 +105,16 @@ async def wait_for_event(
             line = sys.stdin.readline()
             if line == "":
                 return ("eof", None)
-            return ("text", line.strip())
+            stripped = line.strip()
+            # Ignore terminal escape artifacts (e.g. Kitty/WezTerm CSI u sequences like \x1b[51;12u or ^[[51;12u)
+            if (
+                stripped.startswith(("\x1b", "^["))
+                or ";12u" in stripped
+                or ";2u" in stripped
+                or re.match(r"^(\x1b|\^\[)\[\d+;\d+u$", stripped)
+            ):
+                continue
+            return ("text", stripped)
 
         await asyncio.sleep(0.01)
 

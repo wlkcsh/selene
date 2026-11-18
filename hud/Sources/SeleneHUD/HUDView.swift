@@ -15,12 +15,14 @@ public struct HUDView: View {
                     Text(statusTitle)
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(statusColor)
+                        .fixedSize(horizontal: true, vertical: false)
 
                     if !model.activeApp.isEmpty && model.agentState != .idle {
                         Text("•  \(model.activeApp)")
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
 
                     if model.cardsDue > 0 && model.agentState == .idle {
@@ -30,6 +32,7 @@ public struct HUDView: View {
                             .padding(.vertical, 1)
                             .background(Color.purple.opacity(0.2), in: Capsule())
                             .foregroundStyle(.purple)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
 
                     if model.isMuted {
@@ -44,8 +47,9 @@ public struct HUDView: View {
                     Text(model.captionText)
                         .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(.primary)
-                        .lineLimit(3)
-                        .frame(maxWidth: 360, alignment: .leading)
+                        .lineLimit(2)
+                        .frame(maxWidth: 420, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
@@ -72,6 +76,7 @@ public struct HUDView: View {
                 )
                 .shadow(color: Color.black.opacity(0.28), radius: 12, x: 0, y: 4)
         )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onHover { isHovered = $0 }
         .animation(.spring(response: 0.35, dampingFraction: 0.78), value: model.agentState)
         .animation(.easeOut(duration: 0.2), value: model.captionText)
