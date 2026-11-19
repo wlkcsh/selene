@@ -124,4 +124,29 @@ uv run ruff check src tests
 
 # Live GPU + Kokoro + Metal RVC + MLX-Whisper integration test
 uv run pytest -m integration -v -s
+
+# Automated pre-flight check across Python and Swift
+./scripts/git-workflow.sh check
 ```
+
+---
+
+## 🌳 Branching Strategy & Contributing
+
+We follow a structured GitFlow-style multi-branch model:
+
+* **`main`**: Production-ready, tagged releases only (`v0.x.x`). Never commit directly.
+* **`develop`**: Active integration branch. All feature branches and routine fixes merge here.
+* **`feature/<name>`**: New capabilities branched from `develop`.
+* **`fix/<name>`**: Routine bug fixes branched from `develop`.
+* **`hotfix/<name>`**: Urgent production fixes branched from `main` and backported to `develop`.
+
+To start working on a feature or fix:
+```bash
+./scripts/git-workflow.sh start feature my-new-feature
+# or
+./scripts/git-workflow.sh start fix my-bug-fix
+```
+
+See [CONTRIBUTING.md](file:///Users/mac/selene/CONTRIBUTING.md) for full pull request guidelines and architecture invariants.
+

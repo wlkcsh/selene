@@ -7,11 +7,19 @@ public struct PillFrameKey: PreferenceKey {
     }
 }
 
+public struct TranscriptHeightKey: PreferenceKey {
+    public static var defaultValue: CGFloat = 0
+    public static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 public struct HUDView: View {
     @Bindable var model: HUDViewModel
     @State private var isInterruptPressed: Bool = false
     @State private var isHovering: Bool = false
     @State private var hoverOffset: CGSize = .zero
+    @State private var transcriptHeight: CGFloat = 0
 
     private var isNotchMode: Bool {
         return model.displayMode == .notch && (NSScreen.main?.hasPhysicalNotch ?? false)
@@ -126,8 +134,8 @@ public struct HUDView: View {
             // Collapsible Downward Transcript Wing with Markdown & Autoscroll
             if model.isWingExpanded && !model.streamingMarkdown.isEmpty {
                 Divider()
-                    .opacity(0.25)
-                    .padding(.vertical, 8)
+                    .opacity(0.2)
+                    .padding(.vertical, 3)
 
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -135,14 +143,22 @@ public struct HUDView: View {
                             .font(.system(size: 12, design: .rounded))
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 4)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(key: TranscriptHeightKey.self, value: geo.size.height)
+                                }
+                            )
 
                         Color.clear
                             .frame(height: 1)
                             .id("wing_bottom")
                     }
-                    .frame(maxHeight: 200)
+                    .frame(height: min(max(transcriptHeight + 6, 32), 220))
+                    .onPreferenceChange(TranscriptHeightKey.self) { height in
+                        transcriptHeight = height
+                    }
                     .onChange(of: model.streamingMarkdown) { _, _ in
                         proxy.scrollTo("wing_bottom", anchor: .bottom)
                     }
@@ -152,21 +168,21 @@ public struct HUDView: View {
         }
         .frame(minWidth: isNotchMode ? minNotchWidth : 0)
         .padding(.horizontal, isNotchMode ? 20 : 16)
-        .padding(.top, isNotchMode ? notchHeight + 4 : 8)
-        .padding(.bottom, isNotchMode && isHovering ? 11 : 8)
+        .padding(.top, isNotchMode ? (model.isWingExpanded ? notchHeight + 2 : notchHeight + 1) : 6)
+        .padding(.bottom, isNotchMode ? (isHovering ? 8 : 6) : 8)
         .rotation3DEffect(
-            .degrees(isNotchMode ? hoverOffset.height * 5.0 : 0),
+            .degrees(isNotchMode ? hoverOffset.height * 0.8 : 0),
             axis: (x: 1, y: 0, z: 0)
         )
         .rotation3DEffect(
-            .degrees(isNotchMode ? hoverOffset.width * -5.0 : 0),
+            .degrees(isNotchMode ? hoverOffset.width * -0.8 : 0),
             axis: (x: 0, y: 1, z: 0)
         )
         .offset(
-            x: isNotchMode ? hoverOffset.width * 2.5 : 0,
-            y: isNotchMode ? hoverOffset.height * 1.5 : 0
+            x: isNotchMode ? hoverOffset.width * 0.5 : 0,
+            y: isNotchMode ? hoverOffset.height * 0.3 : 0
         )
-        .scaleEffect(isHovering && isNotchMode ? 1.02 : 1.0)
+        .scaleEffect(1.0)
         .background(
             GeometryReader { geo in
                 Color.clear.preference(key: PillFrameKey.self, value: geo.frame(in: .global))
@@ -186,12 +202,12 @@ public struct HUDView: View {
                 guard NSEvent.pressedMouseButtons == 0 else { return }
                 let normX = (location.x / max(minNotchWidth, 1.0)) * 2 - 1
                 let normY = (location.y / max(notchHeight + 24.0, 1.0)) * 2 - 1
-                withAnimation(.interactiveSpring(response: 0.1, dampingFraction: 0.5)) {
+                withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.86)) {
                     isHovering = true
                     hoverOffset = CGSize(width: normX, height: normY)
                 }
             case .ended:
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
                     isHovering = false
                     hoverOffset = .zero
                 }
