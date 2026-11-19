@@ -84,8 +84,6 @@ def read_text_file(path: str, max_chars: int = 4000) -> str:
 
     if not target.is_relative_to(home):
         return f"Rejected path outside home directory: {path}"
-    if not target.exists() or not target.is_file():
-        return f"File not found: {target}"
 
     lower_name = target.name.lower()
     if any(part.lower() in _BLOCKED_DIR_PARTS for part in target.parts):
@@ -98,6 +96,9 @@ def read_text_file(path: str, max_chars: int = 4000) -> str:
         or any(tok in lower_name for tok in ("secret", "credential", "api_key"))
     ):
         return f"Rejected sensitive file for security: {target.name}"
+
+    if not target.exists() or not target.is_file():
+        return f"File not found: {target}"
 
     try:
         head = target.read_bytes()[:1024]

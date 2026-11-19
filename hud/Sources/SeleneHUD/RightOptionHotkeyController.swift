@@ -27,7 +27,11 @@ public final class RightOptionHotkeyController {
     }
 
     public func start() {
-        _ = checkAccessibilityPermissions(prompt: true)
+        let isTrusted = checkAccessibilityPermissions(prompt: false)
+        if !isTrusted && !UserDefaults.standard.bool(forKey: "has_prompted_accessibility") {
+            UserDefaults.standard.set(true, forKey: "has_prompted_accessibility")
+            _ = checkAccessibilityPermissions(prompt: true)
+        }
 
         // Global monitor catches events when Xcode/Cursor/browsers are active
         globalMonitor = NSEvent.addGlobalMonitorForEvents(

@@ -334,6 +334,8 @@ async def main(argv: list[str] | None = None) -> None:
     def handle_mic_rms(rms: float) -> None:
         post_ipc({"type": "rms", "rms": rms})
 
+    daemon_mode = bool(args.daemon or not sys.stdin.isatty())
+
     ear = EarEngine(
         on_barge_in=handle_barge_in,
         chimes_enabled=chimes_enabled,
@@ -341,7 +343,10 @@ async def main(argv: list[str] | None = None) -> None:
         on_capture_start=handle_capture_start,
         on_rms=handle_mic_rms,
     )
-    ear.start_ptt_listener()
+    # In daemon mode, the Swift host (Selene.app) manages global Right Option taps.
+    # Python must NOT register a Quartz tap to avoid triggering secondary TCC prompts.
+    if not daemon_mode:
+        ear.start_ptt_listener()
 
     client = genai.Client()
     chat, n_hist, n_facts, n_due = _create_chat(client, memory, study_cards, tools, cfg)
@@ -349,7 +354,7 @@ async def main(argv: list[str] | None = None) -> None:
 
     tts_label = getattr(kokoro, "backend_label", "Kokoro")
     mode_str = "Fast Pure .pth" if not use_index else "Full FAISS"
-    ptt_str = "Global Right Option" if ear.global_ptt_active else "Enter-Toggle Mic"
+    ptt_str = "Host IPC (Selene.app)" if daemon_mode else ("Global Right Option" if ear.global_ptt_active else "Enter-Toggle Mic")
     print("\n============================================================")
     print(f"  💖 Selene Phase 3A — Parallel Boot in {time.time() - t_boot:.1f}s")
     print(f"  🎙️  Ears: {ptt_str} | Voice: {tts_label} + {mode_str}")
@@ -367,7 +372,6 @@ async def main(argv: list[str] | None = None) -> None:
     bg_tasks.add(warmup_task)
     warmup_task.add_done_callback(bg_tasks.discard)
 
-    daemon_mode = bool(args.daemon or not sys.stdin.isatty())
     if daemon_mode:
         print("  ✨ Running in background daemon mode (HUD IPC & Global Right Option active)")
 

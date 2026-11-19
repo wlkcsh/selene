@@ -22,7 +22,7 @@ def test_read_text_file_blocks_outside_home_and_secrets():
 
 def test_read_text_file_blocks_env_binary_and_truncates_safe_text():
     scratch_dir = Path.home() / "selene" / ".pytest_tmp_read_check"
-    scratch_dir.mkdir(exist_ok=True)
+    scratch_dir.mkdir(parents=True, exist_ok=True)
     try:
         env_file = scratch_dir / ".env.local"
         env_file.write_text("API_KEY=nope", encoding="utf-8")

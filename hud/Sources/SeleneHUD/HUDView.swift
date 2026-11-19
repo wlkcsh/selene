@@ -154,6 +154,10 @@ public struct HUDView: View {
                         }
                     }
 
+                    if model.isWingExpanded {
+                        Spacer(minLength: 0)
+                    }
+
                     // Action controls sitting neatly beside content
                     HStack(spacing: 8) {
                         // Expandable Transcript Wing Toggle
@@ -188,36 +192,28 @@ public struct HUDView: View {
                     }
                 }
 
-                // Collapsible Downward Transcript Wing with Markdown & Autoscroll
+                // Collapsible Downward Transcript Wing with Markdown & Auto-scroll ONLY when genuinely tall
                 if model.isWingExpanded && !model.streamingMarkdown.isEmpty {
                     Divider()
                         .opacity(0.2)
-                        .padding(.vertical, 3)
+                        .padding(.vertical, 4)
 
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            Text(LocalizedStringKey(model.streamingMarkdown))
-                                .font(.system(size: 12, design: .rounded))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(
-                                    GeometryReader { geo in
-                                        Color.clear.preference(key: TranscriptHeightKey.self, value: geo.size.height)
-                                    }
-                                )
-
-                            Color.clear
-                                .frame(height: 1)
-                                .id("wing_bottom")
-                        }
-                        .frame(height: min(max(transcriptHeight + 6, 32), 220))
-                        .onPreferenceChange(TranscriptHeightKey.self) { height in
-                            transcriptHeight = height
-                        }
-                        .onChange(of: model.streamingMarkdown) { _, _ in
-                            proxy.scrollTo("wing_bottom", anchor: .bottom)
+                    Group {
+                        if transcriptHeight > 240.0 {
+                            ScrollViewReader { proxy in
+                                ScrollView(.vertical, showsIndicators: true) {
+                                    transcriptTextContent
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .id("wing_bottom")
+                                }
+                                .frame(height: 240)
+                                .onChange(of: model.streamingMarkdown) { _, _ in
+                                    proxy.scrollTo("wing_bottom", anchor: .bottom)
+                                }
+                            }
+                        } else {
+                            transcriptTextContent
                         }
                     }
                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -278,6 +274,24 @@ public struct HUDView: View {
         .animation(.spring(response: 0.36, dampingFraction: 0.82), value: model.isWingExpanded)
         .animation(.spring(response: 0.32, dampingFraction: 0.72), value: isHovering)
         .animation(.easeOut(duration: 0.18), value: model.captionText)
+    }
+
+    private var transcriptTextContent: some View {
+        Text(LocalizedStringKey(model.streamingMarkdown))
+            .font(.system(size: 12, design: .rounded))
+            .lineSpacing(3)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: TranscriptHeightKey.self, value: geo.size.height)
+                }
+            )
+            .onPreferenceChange(TranscriptHeightKey.self) { height in
+                transcriptHeight = height
+            }
     }
 
     @ViewBuilder

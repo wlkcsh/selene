@@ -77,8 +77,8 @@ EOF
 
 echo -n "APPL????" > "${CONTENTS}/PkgInfo"
 
-# Code sign with local ad-hoc identity
-codesign --force --deep --sign - "${APP_BUNDLE}"
+# Code sign with local ad-hoc identity pinned to stable bundle identifier
+codesign --force --deep --sign - -r='designated => identifier "com.selene.assistant"' "${APP_BUNDLE}"
 
 # 4. Install to /Applications
 INSTALL_TARGET="/Applications/Selene.app"
