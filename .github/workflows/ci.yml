@@ -10,14 +10,10 @@ on:
       - main
       - develop
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   python-test:
     name: Python Lint & Offline Unit Tests
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -47,7 +43,7 @@ jobs:
 
   swift-build:
     name: Swift HUD & Native Engine Build
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -55,3 +51,4 @@ jobs:
       - name: Build Selene HUD Swift Package
         run: |
           swift build --package-path hud -c release
+
