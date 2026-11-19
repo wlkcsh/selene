@@ -59,14 +59,14 @@ def enable_offline_hub_if_cached(cfg: SeleneConfig | None = None) -> bool:
 
 
 class MetalRVCEngine:
-    """Keeps ContentVec, cached FCPE, custom_voice (.pth), and optional FAISS index hot on MPS."""
+    """Keeps ContentVec, cached FCPE, RVC weights (.pth), and optional FAISS index hot on MPS."""
 
     def __init__(self, use_index: bool = True, cfg: SeleneConfig | None = None):
         self.cfg_data = cfg or SeleneConfig()
         t0 = time.time()
         mode_label = "Full FAISS" if use_index else "Fast Pure .pth"
         print(
-            f"🚀 Booting custom_voice RVC Engine ({mode_label}) on Apple Silicon Metal GPU...",
+            f"🚀 Booting Metal RVC Engine ({mode_label}) on Apple Silicon Metal GPU...",
             flush=True,
         )
 
@@ -129,7 +129,7 @@ class MetalRVCEngine:
     def convert_pcm16k(
         self, audio_16k_float32: np.ndarray, *, skip_index: bool = False
     ) -> np.ndarray:
-        """Convert 16kHz float32 audio into custom_voice voice at self.tgt_sr (int16)."""
+        """Convert 16kHz float32 audio into target RVC voice at self.tgt_sr (int16)."""
         audio_max = np.abs(audio_16k_float32).max() / 0.95
         if audio_max > 1.0:
             audio_16k_float32 = audio_16k_float32 / audio_max

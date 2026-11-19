@@ -18,15 +18,15 @@ rvc_protect = 0.5
 rvc_clause1_skip_index = true
 applio_resources = "/Applications/Applio.app/Contents/Resources"
 model_workdir = "~/selene/models/custom_voice"
-rvc_model_path = "logs/custom_voice/model.pth"
-rvc_index_path = "logs/custom_voice/model.index"
+rvc_model_path = "model.pth"
+rvc_index_path = "model.index"
 
 [ears]
 sample_rate = 16000
 min_audio_sec = 0.35
 min_rms_energy = 0.004
 whisper_repo = "mlx-community/whisper-large-v3-turbo"
-whisper_initial_prompt = "Привет, Селена. Слушай, открой Safari, терминал, настройки, экран, аккумулятор, звук. Selene, Ara ara, Jarvis, macOS, Apple Silicon, Python, TypeScript, React, FastAPI, Next.js, Tailwind, pnpm, uv, Git, GitHub, VS Code, Kitty, Kokoro, RVC."
+whisper_initial_prompt = "Привет, Селена. Слушай, открой Safari, терминал, настройки, экран, аккумулятор, звук. Selene, Jarvis, macOS, Apple Silicon, Python, TypeScript, React, FastAPI, Next.js, Tailwind, pnpm, uv, Git, GitHub, VS Code, Kitty, Kokoro, RVC."
 chime_open_sound = "Tink"
 chime_open_vol = 0.18
 chime_close_sound = "Pop"

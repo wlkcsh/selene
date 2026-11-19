@@ -41,7 +41,7 @@ async def test_stream_and_speak_clause1_skips_index():
                             content=SimpleNamespace(
                                 parts=[
                                     SimpleNamespace(
-                                        text="Ara ara, good evening darling! How was your day today?",
+                                        text="Good evening, hello there! How was your day today?",
                                         thought=False,
                                         function_call=None,
                                     )
@@ -85,7 +85,7 @@ async def test_stream_and_speak_clause1_skips_index():
             skip_first_index=True,
         )
 
-    assert "Ara ara" in reply
+    assert "Good evening" in reply
     # At least two chunks produced (Clause 1 + remainder)
     assert len(converted_calls) >= 2
     # Clause 1 must have skip_index=True

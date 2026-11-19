@@ -9,7 +9,7 @@ from selene.pipeline import extract_chunk_parts, split_first_clause
 
 def test_clean_for_speech_strips_markdown_code_and_stage_directions():
     raw = (
-        "Ara ara~ *(Checks your Mac)* Here's **your** code:\n"
+        "Well then~ *(Checks your Mac)* Here's **your** code:\n"
         "```python\nprint('secret')\n```\n"
         "All done, sweetheart! 💖"
     )
@@ -17,7 +17,7 @@ def test_clean_for_speech_strips_markdown_code_and_stage_directions():
     assert "Checks your Mac" not in cleaned
     assert "print" not in cleaned
     assert "*" not in cleaned
-    assert "Ara ara" in cleaned
+    assert "Well then" in cleaned
     assert "All done, sweetheart!" in cleaned
 
 
@@ -36,16 +36,16 @@ def test_load_persona_injects_facts_and_summary(tmp_path: Path):
 
 
 def test_split_first_clause_skips_short_interjection_and_splits_first_full_clause():
-    text = "Ara ara, hello there sweetheart, how is your evening going today?"
+    text = "Well then, hello there sweetheart, how is your evening going today?"
     clause, remainder = split_first_clause(text)
-    assert clause == "Ara ara, hello there sweetheart,"
+    assert clause == "Well then, hello there sweetheart,"
     assert remainder == "how is your evening going today?"
 
 
 def test_split_first_clause_waits_for_minimum_buffer_length():
-    clause, remainder = split_first_clause("Ara ara, hi there,")
+    clause, remainder = split_first_clause("Well then, hi there,")
     assert clause is None
-    assert remainder == "Ara ara, hi there,"
+    assert remainder == "Well then, hi there,"
 
 
 def test_extract_chunk_parts_skips_thoughts_and_collects_tool_calls():

@@ -44,7 +44,7 @@ Right Option PTT (Tink/Pop chimes)
 * Apple Silicon Mac (macOS) with `uv` installed and Python 3.12 (pinned in `.python-version`)
 * `GEMINI_API_KEY` set in your shell environment or `~/.zshrc`
 * Read-only RVC library installed at `/Applications/Applio.app`
-* custom_voice RVC weights placed under `~/selene/models/custom_voice/`
+* Optional: Custom RVC v2 voice model (`.pth` & `.index`) placed under `~/selene/models/custom_voice/` (or configured in `config.toml`)
 
 ### 2. Install Dependencies
 ```bash

@@ -6,7 +6,7 @@ Concise architecture map and non-negotiable macOS invariants for working inside 
 * Package source: `src/selene/` (each module strictly cohesive and under ~350 lines)
 * Native SwiftUI + AppKit HUD: `hud/` (pure Swift 6, 324 KB Mach-O executable, zero third-party deps)
 * Unit & integration tests: `tests/`
-* Local weights (git-ignored): `models/custom_voice/`
+* Local weights (git-ignored): `models/` (e.g. `models/custom_voice/`)
 * Archived Phase 1 script: `archive/selene_phase1.py`
 * External companion files:
   * Persona: `~/.gemini/GEMINI.md`

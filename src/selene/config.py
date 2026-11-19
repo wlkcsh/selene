@@ -9,7 +9,7 @@ from selene import PROJECT_ROOT
 
 DEFAULT_WHISPER_PROMPT = (
     "Привет, Селена. Слушай, открой Safari, терминал, настройки, экран, аккумулятор, звук. "
-    "Selene, Ara ara, Jarvis, macOS, Apple Silicon, Python, TypeScript, React, "
+    "Selene, Jarvis, macOS, Apple Silicon, Python, TypeScript, React, "
     "FastAPI, Next.js, Tailwind, pnpm, uv, Git, GitHub, VS Code, Kitty, Kokoro, RVC."
 )
 
@@ -33,8 +33,8 @@ class SeleneConfig:
     rvc_clause1_skip_index: bool = True
     applio_resources: str = "/Applications/Applio.app/Contents/Resources"
     model_workdir: Path = Path.home() / "selene" / "models" / "custom_voice"
-    rvc_model_path: str = "logs/custom_voice/model.pth"
-    rvc_index_path: str = "logs/custom_voice/model.index"
+    rvc_model_path: str = "model.pth"
+    rvc_index_path: str = "model.index"
 
     # Ears (CoreAudio + Quartz PTT + STT)
     sample_rate: int = 16000
