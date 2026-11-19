@@ -33,6 +33,11 @@ public struct HUDView: View {
         return NSScreen.main?.notchHeight ?? 32.0
     }
 
+    private var idleNotchHeight: CGFloat {
+        let base = NSScreen.main?.notchHeight ?? 32.0
+        return max(base + 5.0, 37.0)
+    }
+
     private var hardwareNotchWidth: CGFloat {
         return NSScreen.main?.notchWidth ?? 185.0
     }
@@ -89,7 +94,7 @@ public struct HUDView: View {
                     .padding(.leading, 6)
                     .padding(.trailing, 12)
                 }
-                .frame(height: notchHeight)
+                .frame(height: idleNotchHeight)
                 .transition(.opacity)
             } else {
                 // Active / Speaking / Wing Expanded Island
@@ -243,7 +248,7 @@ public struct HUDView: View {
             }
         )
         .background(backgroundShape)
-        .clipShape(isNotchMode ? AnyShape(NotchShape(topCornerRadius: 6, bottomCornerRadius: isIdleNotch ? 10 : 18)) : AnyShape(RoundedRectangle(cornerRadius: 18, style: .continuous)))
+        .clipShape(isNotchMode ? AnyShape(NotchShape(topCornerRadius: 6, bottomCornerRadius: isIdleNotch ? 12 : 18)) : AnyShape(RoundedRectangle(cornerRadius: 18, style: .continuous)))
         .onPreferenceChange(PillFrameKey.self) { frame in
             model.onPillFrameChange?(frame)
         }
@@ -297,14 +302,14 @@ public struct HUDView: View {
     @ViewBuilder
     private var backgroundShape: some View {
         if isNotchMode {
-            NotchShape(topCornerRadius: 6, bottomCornerRadius: isIdleNotch ? 10 : 18)
+            NotchShape(topCornerRadius: 6, bottomCornerRadius: isIdleNotch ? 12 : 18)
                 .fill(Color.black)
                 .overlay(alignment: .top) {
                     Rectangle()
                         .fill(Color.black)
                         .frame(height: 6)
                 }
-                .shadow(color: Color.black.opacity(isIdleNotch ? 0.2 : 0.4), radius: isIdleNotch ? 3 : 10, x: 0, y: isIdleNotch ? 1 : 4)
+                .shadow(color: Color.black.opacity(isIdleNotch ? 0.25 : 0.4), radius: isIdleNotch ? 4 : 10, x: 0, y: isIdleNotch ? 2 : 4)
         } else {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.ultraThinMaterial)
