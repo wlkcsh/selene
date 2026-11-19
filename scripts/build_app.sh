@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+APP_VERSION="$(grep -m1 '^version = ' "${REPO_ROOT}/pyproject.toml" | cut -d'"' -f2 || echo "2.5.0")"
 
 echo "🌸 ============================================="
 echo "   Building Selene Standalone macOS Application"
@@ -36,7 +37,7 @@ cp "${REPO_ROOT}/hud/.build/release/SeleneHUD" "${MACOS}/Selene"
 chmod +x "${MACOS}/Selene"
 cp "${REPO_ROOT}/AppIcon.icns" "${RESOURCES}/AppIcon.icns"
 
-cat <<'EOF' > "${CONTENTS}/Info.plist"
+cat <<EOF > "${CONTENTS}/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -56,7 +57,7 @@ cat <<'EOF' > "${CONTENTS}/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>${APP_VERSION}</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
