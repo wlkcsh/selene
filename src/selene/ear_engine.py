@@ -86,6 +86,7 @@ class EarEngine:
         self._utterances: queue.Queue[np.ndarray] = queue.Queue()
         self.global_ptt_active = False
         self.mic_available = False
+        self.mic_gate_open = True
         self._stream: sd.InputStream | None = None
 
         try:
@@ -103,6 +104,8 @@ class EarEngine:
             print(f"⚠️  Mic stream unavailable ({err}) — continuing in text-only mode.", flush=True)
 
     def _mic_callback(self, indata: np.ndarray, frames: int, time_info, status) -> None:
+        if not self.mic_gate_open:
+            return
         mono = indata[:, 0].copy()
         if self.is_recording.is_set():
             with self._lock:
@@ -168,6 +171,16 @@ class EarEngine:
         if self.chimes_enabled:
             _play_chime(self.cfg.chime_close_sound, volume=self.cfg.chime_close_vol)
         self._utterances.put(audio)
+
+    def cancel_capture(self) -> None:
+        """Discard in-flight recording immediately without processing or queuing."""
+        with self._lock:
+            if self._stop_timer is not None:
+                self._stop_timer.cancel()
+                self._stop_timer = None
+            self.is_recording.clear()
+            self._frames.clear()
+            self._preroll.clear()
 
     def schedule_stop_capture(self, delay: float = 0.22) -> None:
         """Schedule stop_capture with a small hangover so ending words are never clipped."""

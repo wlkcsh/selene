@@ -3,17 +3,49 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var viewModel: HUDViewModel!
+    private var daemonManager: DaemonManager!
     private var floatingPanel: FloatingPanel!
+    private var quickInputPanel: QuickInputPanel!
     private var menuBarController: MenuBarController!
+    private var hotkeyController: RightOptionHotkeyController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
 
-        viewModel = HUDViewModel()
+        let socketPath = ProcessInfo.processInfo.environment["SELENE_SOCKET_PATH"] ?? "/tmp/selene.sock"
+        viewModel = HUDViewModel(socketPath: socketPath)
+        daemonManager = DaemonManager()
         floatingPanel = FloatingPanel(viewModel: viewModel)
-        menuBarController = MenuBarController(viewModel: viewModel, panel: floatingPanel)
+        quickInputPanel = QuickInputPanel(viewModel: viewModel)
+        menuBarController = MenuBarController(
+            viewModel: viewModel,
+            panel: floatingPanel,
+            daemonManager: daemonManager,
+            quickInputPanel: quickInputPanel
+        )
+
+        hotkeyController = RightOptionHotkeyController()
+        hotkeyController.onSendCommand = { [weak self] cmd, payload in
+            self?.viewModel.sendRawCommand(cmd, payload: payload)
+        }
+        hotkeyController.start()
+
+        viewModel.onConnectionChange = { [weak self] _ in
+            self?.menuBarController.buildMenu()
+        }
 
         floatingPanel.orderFront(nil)
+        floatingPanel.reposition(animated: false)
+
+        if daemonManager.autoStart {
+            daemonManager.startDaemon()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        hotkeyController?.stop()
+        viewModel.requestQuitDaemon()
+        daemonManager.stopDaemon()
     }
 }
 

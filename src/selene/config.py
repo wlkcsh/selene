@@ -8,6 +8,7 @@ from pathlib import Path
 from selene import PROJECT_ROOT
 
 DEFAULT_WHISPER_PROMPT = (
+    "Привет, Селена. Слушай, открой Safari, терминал, настройки, экран, аккумулятор, звук. "
     "Selene, Ara ara, Jarvis, macOS, Apple Silicon, Python, TypeScript, React, "
     "FastAPI, Next.js, Tailwind, pnpm, uv, Git, GitHub, VS Code, Kitty, Kokoro, RVC."
 )

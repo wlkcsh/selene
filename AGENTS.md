@@ -35,6 +35,9 @@ uv run ruff check src tests
 # CLI smoke test from outside the repo
 cd ~ && uv run --project ~/selene selene-voice --help
 
+# Build & install standalone macOS application bundle
+./scripts/build_app.sh
+
 # Live GPU + MLX-Whisper + Metal RVC verification
 uv run pytest -m integration -v -s
 ```

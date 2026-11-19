@@ -72,22 +72,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Optional path to a custom TOML config file (defaults to ~/selene/config.toml)",
     )
+    parser.add_argument(
+        "--daemon",
+        action="store_true",
+        help="Run as a background daemon without reading terminal stdin",
+    )
     return parser.parse_args(argv)
 
 
 async def wait_for_event(
     ear,
     reminder_queue: queue.Queue[str],
+    ipc_queue: queue.Queue[tuple[str, object]],
     muted: bool,
+    daemon_mode: bool = False,
 ) -> tuple[str, object]:
-    """Non-blocking race between Right-Option PTT voice, timer reminders, and terminal stdin."""
-    mute_tag = " [MUTED]" if muted else ""
-    prompt_label = (
-        f"You{mute_tag} (type, /help, or hold Right Option): "
-        if ear.global_ptt_active
-        else f"You{mute_tag} (type, /help, or press Enter for mic): "
-    )
-    print(prompt_label, end="", flush=True)
+    """Non-blocking race between Right-Option PTT voice, timer reminders, IPC commands, and stdin."""
+    if not daemon_mode and sys.stdin.isatty():
+        mute_tag = " [MUTED]" if muted else ""
+        prompt_label = (
+            f"You{mute_tag} (type, /help, or hold Right Option): "
+            if ear.global_ptt_active
+            else f"You{mute_tag} (type, /help, or press Enter for mic): "
+        )
+        print(prompt_label, end="", flush=True)
 
     while True:
         try:
@@ -96,27 +104,34 @@ async def wait_for_event(
         except queue.Empty:
             pass
 
+        try:
+            cmd = ipc_queue.get_nowait()
+            return cmd
+        except queue.Empty:
+            pass
+
         utt = ear.try_get_utterance()
         if utt is not None:
             return ("voice", utt)
 
-        rlist, _, _ = select.select([sys.stdin], [], [], 0.04)
-        if rlist:
-            line = sys.stdin.readline()
-            if line == "":
-                return ("eof", None)
-            stripped = line.strip()
-            # Ignore terminal escape artifacts (e.g. Kitty/WezTerm CSI u sequences like \x1b[51;12u or ^[[51;12u)
-            if (
-                stripped.startswith(("\x1b", "^["))
-                or ";12u" in stripped
-                or ";2u" in stripped
-                or re.match(r"^(\x1b|\^\[)\[\d+;\d+u$", stripped)
-            ):
-                continue
-            return ("text", stripped)
+        if not daemon_mode and sys.stdin.isatty():
+            rlist, _, _ = select.select([sys.stdin], [], [], 0.04)
+            if rlist:
+                line = sys.stdin.readline()
+                if line == "":
+                    return ("eof", None)
+                stripped = line.strip()
+                # Ignore terminal escape artifacts (e.g. Kitty/WezTerm CSI u sequences like \x1b[51;12u or ^[[51;12u)
+                if (
+                    stripped.startswith(("\x1b", "^["))
+                    or ";12u" in stripped
+                    or ";2u" in stripped
+                    or re.match(r"^(\x1b|\^\[)\[\d+;\d+u$", stripped)
+                ):
+                    continue
+                return ("text", stripped)
 
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.02)
 
 
 def _create_chat(
@@ -184,6 +199,7 @@ async def main(argv: list[str] | None = None) -> None:
     active_turn: dict[str, asyncio.Task | None] = {"task": None}
     pending_context: dict[str, WorkspaceContext | None] = {"ctx": None}
     reminder_queue: queue.Queue[str] = queue.Queue()
+    ipc_queue: queue.Queue[tuple[str, object]] = queue.Queue()
     register_reminder_callback(reminder_queue.put)
 
     ipc: SeleneIPCServer | None = None
@@ -212,19 +228,85 @@ async def main(argv: list[str] | None = None) -> None:
         task = active_turn.get("task")
         if task is not None and not task.done():
             main_loop.call_soon_threadsafe(task.cancel)
-        post_ipc({"type": "state", "state": "idle"})
+        if ear is not None:
+            ear.mic_gate_open = True
+        post_ipc({"type": "state", "state": "idle", "mode": state.get("mode", "ptt")})
 
     def handle_hud_command(cmd: dict) -> None:
         act = cmd.get("cmd")
-        if act == "interrupt":
+        if act in ("interrupt", "barge_in"):
             handle_barge_in()
+            resume = cmd.get("resume_mode")
+            if resume == "hands_free":
+                post_ipc({"type": "state", "state": "listening", "mode": "hands_free"})
+        elif act == "ptt_start":
+            if ear is not None:
+                ear.start_capture()
+        elif act == "ptt_commit":
+            if ear is not None:
+                ear.schedule_stop_capture(0.18)
+        elif act == "ptt_cancel":
+            if ear is not None:
+                ear.cancel_capture()
+            post_ipc({"type": "state", "state": "idle", "mode": state.get("mode", "ptt")})
+        elif act == "set_mode":
+            state["mode"] = cmd.get("mode", "ptt")
+            post_ipc({"type": "state", "state": "idle", "mode": state["mode"]})
+        elif act == "fetch_due_cards":
+            limit = int(cmd.get("limit", 20))
+            cards = study_cards.due_cards(limit=limit)
+            post_ipc({"type": "due_cards", "cards": cards})
+        elif act == "grade_card":
+            card_id = int(cmd.get("card_id", 0))
+            quality = cmd.get("quality", 4)
+            study_cards.review_card(card_id, quality)
+            post_ipc(
+                {
+                    "type": "state",
+                    "state": "idle",
+                    "cards_due": study_cards.due_count(),
+                    "muted": state.get("muted", False),
+                    "mode": state.get("mode", "ptt"),
+                }
+            )
+        elif act == "speak_text":
+            text = cmd.get("text", "").strip()
+            if text and not state.get("muted", False):
+                asyncio.create_task(
+                    speak_once(text, kokoro, rvc, speaker, tts_executor, rvc_executor)
+                )
         elif act == "toggle_mute":
             state["muted"] = not state.get("muted", False)
             if ear is not None:
                 ear.chimes_enabled = not state["muted"]
             status = "ON" if state["muted"] else "OFF"
             print(f"\n🔇 [HUD] Mute toggled: {status}", flush=True)
-            post_ipc({"type": "state", "state": "idle", "muted": state["muted"]})
+            post_ipc({
+                "type": "state",
+                "state": "idle",
+                "muted": state["muted"],
+                "mode": state.get("mode", "ptt"),
+            })
+        elif act == "text":
+            txt = cmd.get("text", "").strip()
+            if txt:
+                ipc_queue.put(("text", txt))
+        elif act == "slash":
+            slash_cmd = cmd.get("command", "").strip()
+            if slash_cmd:
+                ipc_queue.put(("text", slash_cmd))
+        elif act == "quit":
+            ipc_queue.put(("quit", None))
+        elif act == "get_status":
+            post_ipc(
+                {
+                    "type": "state",
+                    "state": "idle",
+                    "cards_due": study_cards.due_count(),
+                    "muted": state.get("muted", False),
+                    "mode": state.get("mode", "ptt"),
+                }
+            )
 
     if ipc is not None:
         ipc.set_command_handler(handle_hud_command)
@@ -285,10 +367,16 @@ async def main(argv: list[str] | None = None) -> None:
     bg_tasks.add(warmup_task)
     warmup_task.add_done_callback(bg_tasks.discard)
 
+    daemon_mode = bool(args.daemon or not sys.stdin.isatty())
+    if daemon_mode:
+        print("  ✨ Running in background daemon mode (HUD IPC & Global Right Option active)")
+
     try:
         while True:
-            kind, payload = await wait_for_event(ear, reminder_queue, state["muted"])
-            if kind == "eof":
+            kind, payload = await wait_for_event(
+                ear, reminder_queue, ipc_queue, state["muted"], daemon_mode=daemon_mode
+            )
+            if kind in ("eof", "quit"):
                 print("\nSelene: Take good care of yourself, darling~ Goodbye! 💖")
                 break
 
@@ -369,6 +457,9 @@ async def main(argv: list[str] | None = None) -> None:
                     await speak_once(goodbye, kokoro, rvc, speaker, tts_executor, rvc_executor)
                 break
 
+            if ear is not None:
+                ear.mic_gate_open = False
+
             post_ipc(
                 {
                     "type": "state",
@@ -378,6 +469,7 @@ async def main(argv: list[str] | None = None) -> None:
                     "window": ctx.window_title if ctx else "",
                     "cards_due": study_cards.due_count(),
                     "muted": state["muted"],
+                    "mode": state.get("mode", "ptt"),
                 }
             )
 
@@ -386,7 +478,7 @@ async def main(argv: list[str] | None = None) -> None:
             def handle_delta(delta: str) -> None:
                 nonlocal speaking_started
                 if not speaking_started:
-                    post_ipc({"type": "state", "state": "speaking", "caption": ""})
+                    post_ipc({"type": "state", "state": "speaking", "caption": "", "mode": state.get("mode", "ptt")})
                     speaking_started = True
                 post_ipc({"type": "delta", "text": delta})
 
@@ -408,12 +500,18 @@ async def main(argv: list[str] | None = None) -> None:
             active_turn["task"] = turn_task
             reply = await turn_task
             active_turn["task"] = None
+
+            if ear is not None:
+                await asyncio.sleep(0.18)  # 180ms speaker tail hangover
+                ear.mic_gate_open = True
+
             post_ipc(
                 {
                     "type": "state",
                     "state": "idle",
                     "cards_due": study_cards.due_count(),
                     "muted": state["muted"],
+                    "mode": state.get("mode", "ptt"),
                 }
             )
 

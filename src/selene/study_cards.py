@@ -122,9 +122,15 @@ class StudyCardStore:
             row = self.conn.execute("SELECT COUNT(*) AS cnt FROM study_cards").fetchone()
             return int(row["cnt"]) if row else 0
 
-    def review_card(self, card_id: int, rating: str) -> str:
-        """Record a review rating ('again', 'hard', 'good', 'easy') and schedule next due date."""
-        norm = rating.strip().lower()
+    def review_card(self, card_id: int, rating: str | int) -> str:
+        """Record a review rating ('again', 'hard', 'good', 'easy' or quality 1-5) and schedule next due date."""
+        if isinstance(rating, int) or (isinstance(rating, str) and rating.strip().isdigit()):
+            q_val = int(rating)
+            q_map = {1: "again", 2: "hard", 3: "hard", 4: "good", 5: "easy"}
+            norm = q_map.get(q_val, "good")
+        else:
+            norm = str(rating).strip().lower()
+
         if norm not in RATING_TO_QUALITY:
             allowed = ", ".join(RATING_TO_QUALITY)
             return f"Invalid rating '{rating}'. Use one of: {allowed}."

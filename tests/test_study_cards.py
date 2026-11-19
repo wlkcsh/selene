@@ -68,6 +68,12 @@ def test_study_card_crud_and_due_flow(study_cards: StudyCardStore):
     missing = study_cards.review_card(999, "good")
     assert "No study card found with ID #999" in missing
 
+    # Integer quality review (1=again, 3=hard, 4=good, 5=easy)
+    study_cards.add_card("Swift", "What is Sendable?", "Thread-safe data transfer protocol.")
+    int_rev = study_cards.review_card(2, 4)
+    assert "Reviewed card #2" in int_rev
+    assert "good" in int_rev
+
 
 def test_add_card_validation(study_cards: StudyCardStore):
     err = study_cards.add_card("Topic", "", "Answer")

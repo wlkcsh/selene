@@ -52,25 +52,37 @@ cd ~/selene
 uv sync
 ```
 
-### 3. Launch Selene
+### 3. Launch Selene as a Standalone App (No Terminal Required!)
+
+You can run Selene completely terminal-free as a native macOS Application:
+
 ```bash
-# Fast mode (pure .pth — ~8.5s parallel boot, lowest latency)
+./scripts/build_app.sh
+```
+
+This compiles and installs **`Selene.app`** directly into `/Applications`. Once built:
+1. Open **Spotlight** (`Cmd + Space`) and type `Selene` (or launch from Finder / Launchpad / Raycast).
+2. A sparkling heart icon appears in your **Menu Bar**, and the floating **Dynamic Island / Notch HUD** appears top-center.
+3. Selene automatically manages and boots the background voice engine daemon for you.
+4. Talk anytime by holding **`Right Option`** anywhere in macOS.
+5. In quiet spaces, click **`💬 Ask Selene...`** in the Menu Bar (or press `Cmd + K`) to bring up the Spotlight-style Quick Input bar and type your question.
+6. The Menu Bar gives you full control: Start/Stop voice engine, Mute, Notch vs Floating pill mode, Review study cards, and View activity logs.
+
+---
+
+### Alternative: CLI Terminal Mode
+
+If you prefer running directly in a terminal tab:
+```bash
+# Fast mode (pure .pth — lowest latency)
 selene-voice --fast
 
 # Full FAISS voice fidelity
 selene-voice
 
-# Optional flags
-selene-voice --fast --no-chimes
-selene-voice --fast --config ~/selene/config.toml
-```
-
-### 4. Launch Native Floating HUD (Optional)
-In another terminal tab (or from Spotlight/Raycast):
-```bash
+# Run HUD companion
 ./scripts/run_hud.sh
 ```
-The frosted glass pill will float top-center over full-screen IDEs and browsers across all Spaces without stealing keyboard focus!
 
 ### 4. Global Eyes-Free Push-to-Talk (`Right Option`)
 To hold **`Right Option`** from any macOS app (VS Code, Safari, etc.):

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -7,6 +8,13 @@ public final class HUDViewModel {
     public var agentState: AgentState = .disconnected
     public var rmsEnergy: Double = 0.0
     public var captionText: String = ""
+    public var streamingMarkdown: String = ""
+    public var isWingExpanded: Bool = false {
+        didSet {
+            onWingExpandedChange?(isWingExpanded)
+        }
+    }
+    public var interactionMode: InteractionMode = .ptt
     public var activeApp: String = ""
     public var activeWindow: String = ""
     public var selectionLen: Int = 0
@@ -21,10 +29,13 @@ public final class HUDViewModel {
     }
     public var onPillFrameChange: ((CGRect) -> Void)?
     public var onDisplayModeChange: ((HUDDisplayMode) -> Void)?
+    public var onConnectionChange: ((Bool) -> Void)?
+    public var onWingExpandedChange: ((Bool) -> Void)?
+    public var onDueCardsReceived: (([StudyCard]) -> Void)?
 
     private var socketClient: SocketClient?
 
-    public init() {
+    public init(socketPath: String = "/tmp/selene.sock") {
         if let saved = UserDefaults.standard.string(forKey: "selene_hud_display_mode"),
            let mode = HUDDisplayMode(rawValue: saved) {
             self.displayMode = mode
@@ -33,6 +44,7 @@ public final class HUDViewModel {
         }
 
         self.socketClient = SocketClient(
+            socketPath: socketPath,
             onEvent: { [weak self] event in
                 self?.handleEvent(event)
             },
@@ -48,24 +60,43 @@ public final class HUDViewModel {
         if !connected {
             self.agentState = .disconnected
         }
+        onConnectionChange?(connected)
     }
 
     public func handleEvent(_ event: HUDEvent) {
+        if event.type == "due_cards", let cards = event.cards {
+            onDueCardsReceived?(cards)
+            return
+        }
+
+        if let rawMode = event.mode, let parsedMode = InteractionMode(rawValue: rawMode) {
+            self.interactionMode = parsedMode
+        }
+
         if let rawState = event.state, let parsed = AgentState(rawValue: rawState) {
             let previousState = self.agentState
             self.agentState = parsed
+            if parsed != previousState {
+                if parsed == .listening {
+                    performHaptic(.alignment)
+                } else if parsed == .speaking {
+                    performHaptic(.generic)
+                }
+            }
+
             if parsed == .idle {
                 self.rmsEnergy = 0.0
             } else if parsed == .listening {
                 self.captionText = ""
+                self.streamingMarkdown = ""
             } else if parsed == .speaking && previousState != .speaking {
                 // Clear previous thinking/query text so Selene's response streams cleanly
                 self.captionText = ""
+                self.streamingMarkdown = ""
             }
         }
 
         if let rms = event.rms {
-            // Smooth RMS amplitude for waveform
             self.rmsEnergy = min(1.0, max(0.0, rms * 4.0))
         }
 
@@ -75,6 +106,7 @@ public final class HUDViewModel {
 
         if let delta = event.text {
             self.captionText += delta
+            self.streamingMarkdown += delta
         }
 
         if let app = event.app {
@@ -95,14 +127,72 @@ public final class HUDViewModel {
     }
 
     public func interrupt() {
+        performHaptic(.levelChange)
         socketClient?.sendCommand(HUDCommand(cmd: "interrupt"))
     }
 
     public func toggleMute() {
+        performHaptic(.generic)
         socketClient?.sendCommand(HUDCommand(cmd: "toggle_mute"))
     }
 
+    public func sendText(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        performHaptic(.generic)
+        socketClient?.sendCommand(HUDCommand(cmd: "text", text: trimmed))
+    }
+
+    public func sendSlash(_ command: String) {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        performHaptic(.generic)
+        socketClient?.sendCommand(HUDCommand(cmd: "slash", command: trimmed))
+    }
+
+    public func sendRawCommand(_ cmd: String, payload: [String: String] = [:]) {
+        socketClient?.sendCommand(HUDCommand(
+            cmd: cmd,
+            mode: payload["mode"],
+            resume_mode: payload["resume_mode"]
+        ))
+    }
+
+    public func fetchDueCards(limit: Int = 20) {
+        socketClient?.sendCommand(HUDCommand(cmd: "fetch_due_cards", limit: limit))
+    }
+
+    public func gradeCard(cardId: Int, quality: Int) {
+        socketClient?.sendCommand(HUDCommand(cmd: "grade_card", card_id: cardId, quality: quality))
+    }
+
+    public func replayAudio(text: String) {
+        socketClient?.sendCommand(HUDCommand(cmd: "speak_text", text: text))
+    }
+
+    public func requestScreenVision() {
+        sendSlash("/screen")
+    }
+
+    public func requestQuitDaemon() {
+        socketClient?.sendCommand(HUDCommand(cmd: "quit"))
+    }
+
+    public func requestStatus() {
+        socketClient?.sendCommand(HUDCommand(cmd: "get_status"))
+    }
+
     public func setDisplayMode(_ mode: HUDDisplayMode) {
+        performHaptic(.alignment)
         self.displayMode = mode
+    }
+
+    public func toggleWing() {
+        performHaptic(.alignment)
+        isWingExpanded.toggle()
+    }
+
+    private func performHaptic(_ pattern: NSHapticFeedbackManager.FeedbackPattern = .generic) {
+        NSHapticFeedbackManager.defaultPerformer.perform(pattern, performanceTime: .default)
     }
 }

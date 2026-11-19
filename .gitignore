@@ -25,5 +25,11 @@ graphify-out/
 
 # Swift & Xcode
 .build/
+Selene.iconset/
 *.xcodeproj
 *.xcworkspace
+
+# References & Scratch Scripts
+Atoll/
+*.scpt
+
