@@ -158,6 +158,6 @@ Before submitting, please make sure your changes respect Selene's core invariant
 
 ---
 
-## 💖 Questions or Ideas?
+## Questions or Ideas?
 
 Feel free to open an **Issue** or start a **Discussion** on GitHub! We're thrilled to build alongside you.
