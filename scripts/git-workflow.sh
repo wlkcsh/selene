@@ -128,7 +128,11 @@ case "${COMMAND}" in
 
         # 5. Commit and tag
         echo "🏷️ Creating release commit and git tag ${TAG}..."
-        git commit -am "chore(release): bump version to ${TAG}"
+        if [[ -n "$(git status --porcelain)" ]]; then
+            git commit -am "chore(release): bump version to ${TAG}"
+        else
+            echo "ℹ️ Version in pyproject.toml is already ${VER}, tagging current HEAD."
+        fi
         git tag -a "${TAG}" -m "Release ${TAG}"
 
         # 6. Push to origin
