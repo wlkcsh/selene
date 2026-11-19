@@ -97,8 +97,8 @@ public final class FloatingPanel: NSPanel {
     public func reposition(animated: Bool = false) {
         guard let screen = NSScreen.main else { return }
         let targetSize = viewModel.isWingExpanded
-            ? NSSize(width: 520, height: 340)
-            : NSSize(width: 620, height: 120)
+            ? NSSize(width: 500, height: 300)
+            : NSSize(width: 620, height: 100)
 
         let targetOrigin: NSPoint
         if viewModel.displayMode == .notch && screen.hasPhysicalNotch {
