@@ -12,6 +12,7 @@ function usage() {
     echo "Usage:"
     echo "  ./scripts/git-workflow.sh start <feature|fix|hotfix|release|docs> <name>"
     echo "  ./scripts/git-workflow.sh check"
+    echo "  ./scripts/git-workflow.sh release <version>"
     echo "  ./scripts/git-workflow.sh status"
     echo "  ./scripts/git-workflow.sh sync"
     echo ""
@@ -19,6 +20,7 @@ function usage() {
     echo "  ./scripts/git-workflow.sh start feature dynamic-waveform"
     echo "  ./scripts/git-workflow.sh start fix ptt-release-jitter"
     echo "  ./scripts/git-workflow.sh start hotfix audio-device-hang"
+    echo "  ./scripts/git-workflow.sh release 2.5.0"
     echo "  ./scripts/git-workflow.sh check"
     exit 1
 }
@@ -89,6 +91,61 @@ case "${COMMAND}" in
         swift build --package-path hud
         
         echo "💖 All verification checks passed! You are ready to commit and push."
+        ;;
+
+    release)
+        if [[ $# -lt 2 ]]; then
+            echo "❌ Error: Missing release version (e.g. 2.5.0 or v2.5.0)."
+            echo "Usage: ./scripts/git-workflow.sh release 2.5.0"
+            exit 1
+        fi
+        RAW_VER="$2"
+        VER="${RAW_VER#v}"
+        TAG="v${VER}"
+
+        echo "🌸 Preparing Release ${TAG}..."
+        
+        # 1. Ensure clean git status
+        if [[ -n "$(git status --porcelain)" ]]; then
+            echo "❌ Error: Working tree has uncommitted changes. Please commit or stash them first."
+            exit 1
+        fi
+
+        # 2. Switch to main and sync
+        echo "🌿 Switching to 'main' branch..."
+        git checkout main
+        if git remote | grep -q "origin"; then
+            git pull origin main
+        fi
+
+        # 3. Update version in pyproject.toml
+        echo "📝 Updating version in pyproject.toml to ${VER}..."
+        sed -i '' -e "s/^version = .*/version = \"${VER}\"/" "${REPO_ROOT}/pyproject.toml"
+
+        # 4. Run pre-flight checks
+        echo "🔍 Running pre-flight checks before tagging..."
+        ./scripts/git-workflow.sh check
+
+        # 5. Commit and tag
+        echo "🏷️ Creating release commit and git tag ${TAG}..."
+        git commit -am "chore(release): bump version to ${TAG}"
+        git tag -a "${TAG}" -m "Release ${TAG}"
+
+        # 6. Push to origin
+        echo "🚀 Pushing release commit and tag to GitHub..."
+        git push origin main
+        git push origin "${TAG}"
+
+        # 7. Merge back to develop so version bump persists in integration
+        echo "🔄 Merging release bump back to 'develop'..."
+        git checkout develop
+        git merge main
+        git push origin develop
+
+        echo ""
+        echo "💖 Congratulations darling! ${TAG} has been released and pushed to GitHub."
+        echo "   GitHub Actions is now compiling Selene.app and publishing your release assets at:"
+        echo "   https://github.com/wlkcsh/selene/releases/tag/${TAG}"
         ;;
 
     status)

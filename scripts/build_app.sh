@@ -80,7 +80,12 @@ echo -n "APPL????" > "${CONTENTS}/PkgInfo"
 # Code sign with local ad-hoc identity pinned to stable bundle identifier
 codesign --force --deep --sign - -r='designated => identifier "com.selene.assistant"' "${APP_BUNDLE}"
 
-# 4. Install to /Applications
+# 4. Install to /Applications (skip if --no-install or NO_INSTALL=1)
+if [[ "${1:-}" == "--no-install" || "${NO_INSTALL:-0}" == "1" ]]; then
+    echo "💖 Done! Selene.app built successfully at ${APP_BUNDLE} (skipped /Applications install)."
+    exit 0
+fi
+
 INSTALL_TARGET="/Applications/Selene.app"
 echo "🚀 Installing to ${INSTALL_TARGET}..."
 rm -rf "${INSTALL_TARGET}"

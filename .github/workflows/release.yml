@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release Tag (e.g. v2.5.0)'
+        required: true
+        default: 'v2.5.0'
+      draft:
+        description: 'Create draft release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-release:
+    name: Build & Publish Release Assets
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine Version & Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Standalone macOS Application
+        run: |
+          ./scripts/build_app.sh --no-install
+
+      - name: Archive Application Bundle (Apple Silicon arm64)
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          ZIP_NAME="Selene-${TAG}-macOS-arm64.zip"
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent Selene.app "${ZIP_NAME}"
+          cd ..
+          echo "ZIP_PATH=build/${ZIP_NAME}" >> "$GITHUB_ENV"
+          echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: "Selene ${{ steps.vars.outputs.tag }} 🌸"
+          generate_release_notes: true
+          draft: ${{ github.event.inputs.draft || false }}
+          prerelease: false
+          files: |
+            ${{ env.ZIP_PATH }}

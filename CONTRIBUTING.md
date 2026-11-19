@@ -123,6 +123,27 @@ swift build --package-path hud
 
 ---
 
+## 🚀 Releasing & Automatic Tagging
+
+When preparing a production release:
+1. Ensure all features for the milestone are merged into `develop`.
+2. Run the automated release workflow from your Mac:
+   ```bash
+   ./scripts/git-workflow.sh release 2.5.0
+   ```
+3. This helper will:
+   * Verify all tests pass locally (`pytest`, `ruff`, `swift build`).
+   * Bump the version in `pyproject.toml`.
+   * Create a signed Git tag `v2.5.0` on `main`.
+   * Push the commit and tag to GitHub, then merge back to `develop`.
+4. **GitHub Actions Release CI** will automatically:
+   * Compile the standalone macOS application bundle (`Selene.app`).
+   * Compress it into a standalone Apple Silicon archive (`Selene-v2.5.0-macOS-arm64.zip`).
+   * Generate release notes from commit history.
+   * Publish the official GitHub Release with downloadable assets.
+
+---
+
 ## ⚖️ Code & Architectural Invariants
 
 Before submitting, please make sure your changes respect Selene's core invariants:
