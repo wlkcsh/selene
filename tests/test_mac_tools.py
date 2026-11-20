@@ -65,12 +65,12 @@ def test_save_note_clamps_path_traversal(tmp_path: Path):
     assert (tmp_path / "evil.md").read_text(encoding="utf-8") == "hello"
 
 
-def test_build_jarvis_tools_exposes_20_named_tools(
+def test_build_jarvis_tools_exposes_27_named_tools(
     memory_store: MemoryStore, study_cards, isolated_cfg: SeleneConfig
 ):
     tools = build_jarvis_tools(memory_store, cfg=isolated_cfg, study_cards=study_cards)
     by_name = {fn.__name__: fn for fn in tools}
-    assert len(by_name) == 20
+    assert len(by_name) == 27
     for expected in (
         "save_note",
         "web_search",
@@ -78,6 +78,13 @@ def test_build_jarvis_tools_exposes_20_named_tools(
         "forget_fact",
         "search_memory",
         "inspect_screen",
+        "play_spotify_track",
+        "create_calendar_event",
+        "list_calendar_events",
+        "create_reminder",
+        "list_reminders",
+        "create_apple_note",
+        "set_language_mode",
         "log_study_card",
         "list_due_study_cards",
         "review_study_card",

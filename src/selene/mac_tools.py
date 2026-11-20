@@ -1,13 +1,32 @@
 """Safe macOS Jarvis tools and Gemini tool-bundle builder for Selene."""
 
+import asyncio
+import concurrent.futures
 import datetime
+import logging
 import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
+from selene.apple_automations import (
+    create_apple_note as _create_apple_note,
+)
+from selene.apple_automations import (
+    create_calendar_event as _create_calendar_event,
+)
+from selene.apple_automations import (
+    create_reminder as _create_reminder,
+)
+from selene.apple_automations import (
+    list_calendar_events as _list_calendar_events,
+)
+from selene.apple_automations import (
+    list_reminders as _list_reminders,
+)
 from selene.config import SeleneConfig
 from selene.persona import clean_for_speech, ensure_api_key, load_persona
 from selene.screen_vision import inspect_screen as _inspect_screen
+from selene.spotify_resolver import SpotifyResolver
 from selene.timers import (
     cancel_timer,
     list_timers,
@@ -15,6 +34,8 @@ from selene.timers import (
     set_study_timer,
 )
 from selene.web_search import web_search as _web_search
+
+logger = logging.getLogger(__name__)
 
 _BLOCKED_DIR_PARTS = {".ssh", ".aws", ".gnupg", ".kube", ".docker"}
 _BLOCKED_FILENAMES = {
@@ -170,8 +191,20 @@ def control_media(action: str, volume_percent: int = -1) -> str:
         scripts = {
             "mute": "set volume with output muted",
             "unmute": "set volume without output muted",
-            "next": 'tell application "Music" to next track',
-            "previous": 'tell application "Music" to previous track',
+            "next": (
+                'if application "Spotify" is running then\n'
+                '  tell application "Spotify" to next track\n'
+                'else if application "Music" is running then\n'
+                '  tell application "Music" to next track\n'
+                "end if"
+            ),
+            "previous": (
+                'if application "Spotify" is running then\n'
+                '  tell application "Spotify" to previous track\n'
+                'else if application "Music" is running then\n'
+                '  tell application "Music" to previous track\n'
+                "end if"
+            ),
         }
         script = scripts[act]
 
@@ -214,9 +247,123 @@ def build_jarvis_tools(
     memory,
     cfg: SeleneConfig | None = None,
     study_cards=None,
+    ipc_server=None,
+    on_language_change=None,
 ) -> list:
     """Bind live MemoryStore, Screen Vision & config-aware tools alongside stateless macOS tools."""
     active_cfg = cfg or SeleneConfig()
+    resolver = SpotifyResolver(
+        client_id=active_cfg.spotify_client_id,
+        client_secret=active_cfg.spotify_client_secret,
+    )
+
+    def play_spotify_track(query: str) -> str:
+        """Search Spotify for a track and start playing it on macOS.
+        MANDATORY: Call this tool whenever the user asks to play music, play a track, play an artist,
+        or put on songs (e.g. 'поставь музыку Die for you', 'включи The Weeknd', 'play Bohemian Rhapsody').
+        Never answer conversationally without invoking this tool when music playback is requested.
+        """
+        cleaned = query.strip()
+        if not cleaned:
+            return "Please provide a track title or artist to play."
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                resolved = pool.submit(asyncio.run, resolver.find_track(cleaned)).result(timeout=6.0)
+        else:
+            resolved = asyncio.run(resolver.find_track(cleaned))
+
+        if not resolved:
+            return f"No track found matching '{cleaned}' on Spotify."
+
+        uri = resolved.get("uri", "")
+        album_uri = resolved.get("album_uri", "")
+        name = resolved.get("name", cleaned)
+        artist = resolved.get("artist", "Unknown Artist")
+        is_direct_track = uri.startswith("spotify:track:")
+
+        # 1. Attempt to dispatch via IPC to Swift host if available
+        if ipc_server is not None and getattr(ipc_server, "_clients", None):
+            try:
+                if loop and loop.is_running():
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        rpc_res = pool.submit(
+                            asyncio.run,
+                            ipc_server.call_automation(
+                                app="spotify",
+                                action="play_uri",
+                                args=[uri, album_uri or "none"],
+                                timeout=6.0,
+                            ),
+                        ).result(timeout=7.0)
+                else:
+                    rpc_res = asyncio.run(
+                        ipc_server.call_automation(
+                            app="spotify",
+                            action="play_uri",
+                            args=[uri, album_uri or "none"],
+                            timeout=6.0,
+                        )
+                    )
+                if rpc_res.get("ok"):
+                    res_out = str(rpc_res.get("output") or "").strip()
+                    if res_out == "playing" or is_direct_track:
+                        return f"Playing {name} by {artist} on Spotify."
+                    else:
+                        return (
+                            f"Opened Spotify search for '{name}' by {artist}. "
+                            "Press play in Spotify to start listening."
+                        )
+            except Exception as err:
+                logger.warning("IPC automation failed, falling back to direct osascript: %s", err)
+
+        # 2. Direct osascript fallback (for CLI mode or when Swift HUD is not connected)
+        play_script = (
+            Path(__file__).resolve().parents[2]
+            / "hud"
+            / "Resources"
+            / "Automations"
+            / "spotify"
+            / "play_uri.applescript"
+        )
+        if play_script.exists():
+            proc = subprocess.run(
+                ["osascript", str(play_script), uri, album_uri or "none"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            out = (proc.stdout or "").strip()
+            if out == "playing" or is_direct_track:
+                return f"Playing {name} by {artist} on Spotify."
+            else:
+                return (
+                    f"Opened Spotify search for '{name}' by {artist}. "
+                    "Press play in Spotify to start listening."
+                )
+        else:
+            if uri.startswith("spotify:search:"):
+                subprocess.run(
+                    ["osascript", "-e", f'tell application "Spotify" to open location "{uri}"'],
+                    check=False,
+                )
+                return (
+                    f"Opened Spotify search for '{name}' by {artist}. "
+                    "Press play in Spotify to start listening."
+                )
+            else:
+                subprocess.run(
+                    ["osascript", "-e", f'tell application "Spotify" to play track "{uri}"'],
+                    check=False,
+                )
+                return f"Playing {name} by {artist} on Spotify."
+
+    play_spotify_track.__name__ = "play_spotify_track"
 
     def save_note_tool(filename: str, content: str) -> str:
         """Save a text or markdown note to Selene's notes folder."""
@@ -255,6 +402,77 @@ def build_jarvis_tools(
 
     inspect_screen_tool.__name__ = "inspect_screen"
 
+    def create_calendar_event(
+        title: str,
+        start_time: str,
+        end_time: str = "",
+        calendar_name: str = "",
+        notes: str = "",
+        location: str = "",
+    ) -> str:
+        """Create a new event in Apple Calendar with a title, date/time (e.g. 'tomorrow at 3pm', '2026-11-21 15:00', 'завтра в 18:00'), optional end time, calendar name, notes, and location."""
+        return _create_calendar_event(
+            ipc_server=ipc_server,
+            title=title,
+            start_time=start_time,
+            end_time=end_time,
+            calendar_name=calendar_name,
+            notes=notes,
+            location=location,
+        )
+
+    create_calendar_event.__name__ = "create_calendar_event"
+
+    def list_calendar_events(days_ahead: int = 7, calendar_name: str = "") -> str:
+        """List upcoming events from Apple Calendar for the next N days (default 7). Optionally filter by calendar name."""
+        return _list_calendar_events(
+            ipc_server=ipc_server,
+            days_ahead=days_ahead,
+            calendar_name=calendar_name,
+        )
+
+    list_calendar_events.__name__ = "list_calendar_events"
+
+    def create_reminder(
+        title: str,
+        due_date: str = "",
+        list_name: str = "",
+        notes: str = "",
+        priority: int = 0,
+    ) -> str:
+        """Create a new task in Apple Reminders with a title, optional due date (e.g. 'tomorrow at 10am', 'завтра в 10:00'), list name, notes, and priority (0=none, 1=high, 5=medium, 9=low)."""
+        return _create_reminder(
+            ipc_server=ipc_server,
+            title=title,
+            due_date=due_date,
+            list_name=list_name,
+            notes=notes,
+            priority=priority,
+        )
+
+    create_reminder.__name__ = "create_reminder"
+
+    def list_reminders(list_name: str = "", include_completed: bool = False) -> str:
+        """List tasks from Apple Reminders. Optionally filter by list name or include completed tasks."""
+        return _list_reminders(
+            ipc_server=ipc_server,
+            list_name=list_name,
+            include_completed=include_completed,
+        )
+
+    list_reminders.__name__ = "list_reminders"
+
+    def create_apple_note(title: str, body: str = "", folder: str = "") -> str:
+        """Create a new note in the native macOS Apple Notes application with a title, body text, and optional folder."""
+        return _create_apple_note(
+            ipc_server=ipc_server,
+            title=title,
+            body=body,
+            folder=folder,
+        )
+
+    create_apple_note.__name__ = "create_apple_note"
+
     tools = [
         get_mac_status,
         open_mac_app,
@@ -273,7 +491,26 @@ def build_jarvis_tools(
         forget_fact,
         search_memory,
         inspect_screen_tool,
+        play_spotify_track,
+        create_calendar_event,
+        list_calendar_events,
+        create_reminder,
+        list_reminders,
+        create_apple_note,
     ]
+
+    def set_language_mode(mode: str, reply_policy: str = "match") -> str:
+        """Switch Selene's language mode ('en' for English, 'ru' for Russian, 'auto' for auto-detect). Optionally set reply_policy ('match' or 'force_en')."""
+        valid_modes = {"en": "en", "english": "en", "ru": "ru", "russian": "ru", "auto": "auto"}
+        norm_mode = valid_modes.get(mode.strip().lower())
+        if not norm_mode:
+            return f"Invalid mode '{mode}'. Choose 'en', 'ru', or 'auto'."
+        norm_policy = "force_en" if reply_policy.strip().lower() in ("force_en", "always_english", "english") else "match"
+        if on_language_change is not None:
+            on_language_change(norm_mode, norm_policy)
+        return f"Language mode switched to '{norm_mode}' with reply policy '{norm_policy}'."
+
+    tools.append(set_language_mode)
 
     if study_cards is not None:
 
