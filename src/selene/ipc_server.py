@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ class SeleneIPCServer:
         self._command_handler: Callable[[dict[str, Any]], Any] | None = None
         self._lock = asyncio.Lock()
         self._last_state: dict[str, Any] = {"type": "state", "state": "idle"}
+        self._pending_rpc: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
     async def start(self) -> None:
         """Bind and listen on the Unix Domain Socket."""
@@ -54,10 +56,19 @@ class SeleneIPCServer:
                     continue
                 try:
                     payload = json.loads(text)
-                    if isinstance(payload, dict) and self._command_handler is not None:
-                        res = self._command_handler(payload)
-                        if asyncio.iscoroutine(res):
-                            await res
+                    if isinstance(payload, dict):
+                        # Intercept RPC replies from Swift
+                        if payload.get("cmd") == "rpc_reply":
+                            req_id = payload.get("reqId") or payload.get("req_id")
+                            if req_id and req_id in self._pending_rpc:
+                                fut = self._pending_rpc[req_id]
+                                if not fut.done():
+                                    fut.set_result(payload)
+                                continue
+                        if self._command_handler is not None:
+                            res = self._command_handler(payload)
+                            if asyncio.iscoroutine(res):
+                                await res
                 except json.JSONDecodeError:
                     pass
         except (ConnectionResetError, BrokenPipeError, asyncio.CancelledError):
@@ -101,8 +112,54 @@ class SeleneIPCServer:
                 except Exception:
                     pass
 
+    async def call_automation(
+        self,
+        app: str,
+        action: str,
+        args: list[str] | None = None,
+        timeout: float = 6.0,
+    ) -> dict[str, Any]:
+        """Send an automation RPC request to the connected Swift host and await the response."""
+        if not self._clients:
+            return {
+                "ok": False,
+                "errorCode": "no_client",
+                "errorMessage": "No connected Selene Swift host on socket.",
+            }
+
+        req_id = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[dict[str, Any]] = loop.create_future()
+        self._pending_rpc[req_id] = fut
+
+        payload = {
+            "type": "automate",
+            "reqId": req_id,
+            "app": app,
+            "action": action,
+            "args": args or [],
+        }
+
+        await self.broadcast(payload)
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        except TimeoutError:
+            return {
+                "ok": False,
+                "errorCode": "timeout",
+                "errorMessage": f"Automation request '{app}.{action}' timed out after {timeout}s.",
+            }
+        finally:
+            self._pending_rpc.pop(req_id, None)
+
     async def stop(self) -> None:
         """Gracefully close all client connections and unlink the socket."""
+        # Cancel any pending RPC calls
+        for fut in self._pending_rpc.values():
+            if not fut.done():
+                fut.cancel()
+        self._pending_rpc.clear()
+
         async with self._lock:
             for writer in list(self._clients):
                 try:
