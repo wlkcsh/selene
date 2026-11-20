@@ -40,6 +40,7 @@ async def handle_slash_command(
             "  /screen [q]   — Capture frontmost window and ask Selene about it\n"
             "  /timers       — List active study timers\n"
             "  /config       — Inspect active model, voice, pitch & path settings\n"
+            "  /lang [mode]  — Switch language mode ('en', 'ru', 'auto')\n"
             "  /mute         — Toggle quiet text-only mode (mutes voice & chimes)\n"
             "  /compact      — Compact recent turns into long-term summary now\n"
             "  /forget       — Clear chat history & summary (add 'all' to also wipe facts)\n"
@@ -95,6 +96,44 @@ async def handle_slash_command(
         print("\n⚙️  Selene Active Configuration:")
         print(format_config_summary(cfg))
         print()
+        return "handled"
+
+    if cmd == "/lang":
+        subparts = raw_arg.split()
+        if not subparts:
+            current_mode = state.get("language_mode", cfg.whisper_language)
+            current_policy = state.get("reply_policy", cfg.reply_policy)
+            print(f"\n🌐 Active Language Mode: {current_mode} (reply_policy: {current_policy})")
+            print("   Usage: /lang en | /lang ru | /lang auto [match|force_en]\n")
+            return "handled"
+
+        new_mode = subparts[0].lower()
+        if new_mode not in ("en", "ru", "auto"):
+            print(f"\n⚠️  Unknown language mode '{new_mode}'. Use 'en', 'ru', or 'auto'.\n")
+            return "handled"
+
+        new_policy = subparts[1].lower() if len(subparts) > 1 else state.get("reply_policy", "match")
+        if new_policy not in ("match", "force_en"):
+            new_policy = "match"
+
+        state["language_mode"] = new_mode
+        state["reply_policy"] = new_policy
+        if ear is not None and hasattr(ear, "set_language_mode"):
+            ear.set_language_mode(new_mode)
+        if "voice_router" in state and hasattr(state["voice_router"], "reply_policy"):
+            state["voice_router"].reply_policy = new_policy
+            if new_mode in ("ru", "auto"):
+                state["voice_router"].prewarm_silero()
+        if "post_ipc" in state and callable(state["post_ipc"]):
+            state["post_ipc"](
+                {
+                    "type": "language_state",
+                    "mode": new_mode,
+                    "reply_policy": new_policy,
+                    "last_detected": getattr(ear, "last_detected_lang", "en"),
+                }
+            )
+        print(f"\n🌐 Language switched to '{new_mode}' (reply_policy: '{new_policy}')\n")
         return "handled"
 
     if cmd == "/mute":

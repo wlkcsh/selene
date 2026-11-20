@@ -49,6 +49,42 @@ async def test_mute_toggles_state_and_ear_chimes(
     assert ear.chimes_enabled is True
 
 
+async def test_lang_command_switches_mode_and_policy(
+    memory_store: MemoryStore, isolated_cfg: SeleneConfig, capsys
+):
+    class MockEar:
+        def __init__(self):
+            self.language_mode = "en"
+            self.last_detected_lang = "en"
+        def set_language_mode(self, mode):
+            self.language_mode = mode
+
+    ear = MockEar()
+    ipc_events = []
+    state = {
+        "language_mode": "en",
+        "reply_policy": "match",
+        "post_ipc": lambda p: ipc_events.append(p),
+    }
+
+    # Query without args
+    assert await handle_slash_command("/lang", memory_store, state, ear, None, isolated_cfg) == "handled"
+    out = capsys.readouterr().out
+    assert "Active Language Mode: en" in out
+
+    # Switch to ru
+    assert await handle_slash_command("/lang ru", memory_store, state, ear, None, isolated_cfg) == "handled"
+    assert state["language_mode"] == "ru"
+    assert ear.language_mode == "ru"
+    assert ipc_events[-1]["mode"] == "ru"
+
+    # Switch to auto with force_en
+    assert await handle_slash_command("/lang auto force_en", memory_store, state, ear, None, isolated_cfg) == "handled"
+    assert state["language_mode"] == "auto"
+    assert state["reply_policy"] == "force_en"
+    assert ear.language_mode == "auto"
+
+
 async def test_forget_preserves_facts_and_forget_all_wipes_them(
     memory_store: MemoryStore, isolated_cfg: SeleneConfig
 ):

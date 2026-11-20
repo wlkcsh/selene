@@ -26,6 +26,58 @@ def resample_24k_to_16k(audio_24k: np.ndarray) -> np.ndarray:
     return np.asarray(resample_poly(arr, up=2, down=3), dtype=np.float32)
 
 
+def trim_silence_16k(
+    audio: np.ndarray,
+    text: str = "",
+    lead_pad_ms: int = 15,
+    thresh: float = 0.005,
+) -> np.ndarray:
+    """Trim excessive leading & trailing silence from synthesized 16kHz speech.
+
+    Provides contextual padding based on trailing punctuation:
+    - Comma / semicolon / colon / dash: 60ms trailing cushion (crisp, natural clause breath)
+    - Full sentence (. ! ?): 140ms trailing cushion (clear sentence boundary)
+    - Ellipsis (...): 200ms trailing cushion
+    - Unpunctuated: 35ms cushion
+    Includes a 3ms micro-fade to eliminate boundary clicks and pops.
+    """
+    if audio is None or audio.size == 0:
+        return np.empty(0, dtype=np.float32)
+
+    arr = np.asarray(audio, dtype=np.float32).reshape(-1)
+    stripped = text.strip() if text else ""
+    if stripped.endswith((",", ";", ":", "—", "–")):
+        trail_pad_ms = 60
+    elif stripped.endswith((".", "!", "?")):
+        trail_pad_ms = 140
+    elif stripped.endswith(("...", "…")):
+        trail_pad_ms = 200
+    else:
+        trail_pad_ms = 35
+
+    win = 160  # 10ms window at 16kHz
+    if len(arr) < win:
+        return arr
+
+    env = np.convolve(np.abs(arr), np.ones(win) / win, mode="same")
+    idx = np.where(env > thresh)[0]
+    if len(idx) == 0:
+        return arr
+
+    start_idx = max(0, idx[0] - int(16000 * lead_pad_ms / 1000.0))
+    end_idx = min(len(arr), idx[-1] + int(16000 * trail_pad_ms / 1000.0))
+    trimmed = arr[start_idx:end_idx].copy()
+
+    fade_len = min(48, len(trimmed) // 4)
+    if fade_len > 0:
+        fade_in = np.linspace(0.0, 1.0, fade_len, dtype=np.float32)
+        fade_out = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)
+        trimmed[:fade_len] *= fade_in
+        trimmed[-fade_len:] *= fade_out
+
+    return trimmed
+
+
 def is_kokoro_cached() -> bool:
     """Return True if PyTorch Kokoro-82M weights exist in local HF cache."""
     hub = Path.home() / ".cache" / "huggingface" / "hub"
@@ -103,7 +155,8 @@ class KokoroMLXEngine:
             audio_24k = np.asarray(result.audio, dtype=np.float32)
             if audio_24k.size == 0:
                 return None
-            return resample_24k_to_16k(audio_24k)
+            resampled = resample_24k_to_16k(audio_24k)
+            return trim_silence_16k(resampled, text=text)
         finally:
             _clear_mlx_cache(self._mx)
 
@@ -145,7 +198,8 @@ class KokoroTTSEngine:
                 chunks.append(np.asarray(audio, dtype=np.float32))
         if not chunks:
             return None
-        return resample_24k_to_16k(np.concatenate(chunks))
+        resampled = resample_24k_to_16k(np.concatenate(chunks))
+        return trim_silence_16k(resampled, text=text)
 
 
 def create_tts_engine(cfg: SeleneConfig | None = None) -> KokoroMLXEngine | KokoroTTSEngine:

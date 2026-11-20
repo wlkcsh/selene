@@ -7,8 +7,48 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 
 from selene.config import SeleneConfig
-from selene.pipeline import stream_and_speak
-from selene.tts_engine import create_tts_engine, resample_24k_to_16k
+from selene.pipeline import split_first_clause, stream_and_speak
+from selene.tts_engine import create_tts_engine, resample_24k_to_16k, trim_silence_16k
+
+
+def test_trim_silence_16k():
+    # Empty and invalid cases
+    assert trim_silence_16k(None).size == 0
+    assert trim_silence_16k(np.empty(0)).size == 0
+
+    # Constant silence
+    silence = np.zeros(16000, dtype=np.float32)
+    assert trim_silence_16k(silence).size == 16000
+
+    # Audio with 500ms leading silence (8000 samples) and 500ms trailing silence (8000 samples)
+    lead_silence = np.zeros(8000, dtype=np.float32)
+    active_speech = np.ones(3200, dtype=np.float32) * 0.1  # 200ms of active speech
+    trail_silence = np.zeros(8000, dtype=np.float32)
+    padded_audio = np.concatenate([lead_silence, active_speech, trail_silence])
+
+    # With comma text, trailing cushion is 60ms (960 samples), leading 15ms (240 samples)
+    trimmed_comma = trim_silence_16k(padded_audio, text="Hello darling,")
+    # Expected length: approx 15ms + 200ms + 60ms = ~275ms (4400 samples)
+    assert 4000 <= len(trimmed_comma) <= 4800
+    assert len(trimmed_comma) < len(padded_audio)
+
+    # With sentence period, trailing cushion is 140ms
+    trimmed_period = trim_silence_16k(padded_audio, text="Hello darling.")
+    # Expected length: approx 15ms + 200ms + 140ms = ~355ms (5680 samples)
+    assert len(trimmed_period) > len(trimmed_comma)
+
+
+def test_split_first_clause():
+    # Below 40 chars should not split
+    clause, rem = split_first_clause("Привет, мой хороший,")
+    assert clause is None
+    assert rem == "Привет, мой хороший,"
+
+    # Above 40 chars with comma >= 25 chars should split cleanly
+    long_buf = "Конечно, мой хороший, давай я помогу тебе во всем разобраться."
+    clause, rem = split_first_clause(long_buf)
+    assert clause == "Конечно, мой хороший,"
+    assert rem == "давай я помогу тебе во всем разобраться."
 
 
 def test_resample_24k_to_16k_exact_lengths():
@@ -59,7 +99,7 @@ async def test_stream_and_speak_clause1_skips_index():
 
     converted_calls = []
 
-    def mock_convert(audio, *, skip_index=False):
+    def mock_convert(audio, *, skip_index=False, **kwargs):
         converted_calls.append(skip_index)
         return np.zeros(1600, dtype=np.int16)
 

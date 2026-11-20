@@ -9,13 +9,13 @@ import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from selene.persona import clean_for_speech
 
 if TYPE_CHECKING:
     from selene.voice_engine import (
         GaplessSpeaker,
-        KokoroMLXEngine,
-        KokoroTTSEngine,
         MetalRVCEngine,
     )
 
@@ -40,8 +40,8 @@ def extract_chunk_parts(chunk) -> tuple[str, list[str]]:
 
 
 def split_first_clause(text_buffer: str) -> tuple[str | None, str]:
-    """Split an early opening clause (>= 20 chars) once buffer >= 35 chars for faster speech start."""
-    if len(text_buffer) < 35:
+    """Split an early opening clause (>= 20 chars) once buffer >= 40 chars for faster speech start."""
+    if len(text_buffer) < 40:
         return None, text_buffer
     for match in CLAUSE_SPLIT.finditer(text_buffer):
         if match.start() >= 20:
@@ -51,7 +51,7 @@ def split_first_clause(text_buffer: str) -> tuple[str | None, str]:
 
 async def speak_once(
     text: str,
-    kokoro: KokoroMLXEngine | KokoroTTSEngine,
+    kokoro,
     rvc: MetalRVCEngine,
     speaker: GaplessSpeaker,
     tts_executor: concurrent.futures.ThreadPoolExecutor,
@@ -62,10 +62,13 @@ async def speak_once(
     if not cleaned:
         return
     loop = asyncio.get_running_loop()
+    detect_fn = getattr(kokoro, "detect_clause_lang", lambda _: "en")
+    lang = detect_fn(cleaned)
     pcm_16k = await loop.run_in_executor(tts_executor, kokoro.synthesize_16k, cleaned)
     if pcm_16k is None:
         return
-    pcm_48k = await loop.run_in_executor(rvc_executor, rvc.convert_pcm16k, pcm_16k)
+    convert_fn = functools.partial(rvc.convert_pcm16k, lang=lang)
+    pcm_48k = await loop.run_in_executor(rvc_executor, convert_fn, pcm_16k)
     speaker.reset()
     speaker.play_chunk(pcm_48k)
     while (
@@ -77,7 +80,7 @@ async def speak_once(
 async def stream_and_speak(
     chat,
     user_text: str,
-    kokoro: KokoroMLXEngine | KokoroTTSEngine,
+    kokoro,
     rvc: MetalRVCEngine,
     speaker: GaplessSpeaker,
     tts_executor: concurrent.futures.ThreadPoolExecutor,
@@ -90,7 +93,7 @@ async def stream_and_speak(
     """Two-stage concurrent pipeline with first-clause fast-start: Gemini -> Kokoro -> RVC -> Speakers."""
     speaker.reset()
     sentence_queue: asyncio.Queue[tuple[str, bool] | None] = asyncio.Queue()
-    rvc_queue: asyncio.Queue[tuple[object, bool] | None] = asyncio.Queue()
+    rvc_queue: asyncio.Queue[tuple[np.ndarray, bool, str] | None] = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
     async def tts_worker() -> None:
@@ -104,11 +107,13 @@ async def stream_and_speak(
             try:
                 cleaned = clean_for_speech(sent)
                 if cleaned:
+                    detect_fn = getattr(kokoro, "detect_clause_lang", lambda _: "en")
+                    lang = detect_fn(cleaned)
                     pcm_16k = await loop.run_in_executor(
                         tts_executor, kokoro.synthesize_16k, cleaned
                     )
                     if pcm_16k is not None and not speaker.interrupt_event.is_set():
-                        await rvc_queue.put((pcm_16k, is_first))
+                        await rvc_queue.put((pcm_16k, is_first, lang))
             except Exception as err:
                 print(f"\n[TTS warning: {err}]", flush=True)
             sentence_queue.task_done()
@@ -119,10 +124,10 @@ async def stream_and_speak(
             if item is None or speaker.interrupt_event.is_set():
                 rvc_queue.task_done()
                 break
-            pcm_16k, is_first = item
+            pcm_16k, is_first, lang = item
             try:
                 skip_idx = bool(is_first and skip_first_index)
-                convert_fn = functools.partial(rvc.convert_pcm16k, skip_index=skip_idx)
+                convert_fn = functools.partial(rvc.convert_pcm16k, skip_index=skip_idx, lang=lang)
                 pcm_48k = await loop.run_in_executor(rvc_executor, convert_fn, pcm_16k)
                 if pcm_48k is not None and not speaker.interrupt_event.is_set():
                     speaker.play_chunk(pcm_48k)

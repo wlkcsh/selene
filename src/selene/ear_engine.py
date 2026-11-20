@@ -28,6 +28,11 @@ SAMPLE_RATE = 16000
 RIGHT_OPTION_KEYCODE = 0x3D
 RIGHT_OPTION_MASK = 0x00000040  # Device-dependent Right Option bit on macOS
 
+WHISPER_PROMPTS = {
+    "en": "Selene, macOS, Xcode, Cursor, SwiftUI, Spotify, Safari, Terminal, Python, MLX, Kokoro, RVC.",
+    "ru": "Селена, привет. Открой Терминал, Сафари, Спотифай, Настройки, экран, проверь код и карточки памяти.",
+}
+
 
 def _clear_mlx_cache(mx_mod) -> None:
     """Release MLX Metal allocator cache cleanly across MLX versions."""
@@ -61,6 +66,20 @@ def _play_chime(sound_name: str, volume: float = 0.18) -> None:
         pass
 
 
+def find_builtin_input_device() -> int | str | None:
+    """Find the MacBook internal/built-in microphone to prevent Bluetooth SCO quality degradation."""
+    try:
+        devices = sd.query_devices()
+        for idx, dev in enumerate(devices):
+            if dev.get("max_input_channels", 0) > 0:
+                name = str(dev.get("name", "")).lower()
+                if any(term in name for term in ("macbook", "built-in", "internal")):
+                    return idx
+    except Exception:
+        pass
+    return None
+
+
 class EarEngine:
     """Thread-safe 16kHz CoreAudio recorder with passive Quartz Right-Option PTT & MLX/Groq STT."""
 
@@ -73,6 +92,9 @@ class EarEngine:
         on_rms: Callable[[float], None] | None = None,
     ):
         self.cfg = cfg or SeleneConfig()
+        self.language_mode = (getattr(self.cfg, "whisper_language", "auto") or "auto").strip().lower()
+        self.last_detected_lang = "en"
+        self._whisper_model = None
         self.on_barge_in = on_barge_in
         self.on_capture_start = on_capture_start
         self.on_rms = on_rms
@@ -89,6 +111,12 @@ class EarEngine:
         self.mic_gate_open = True
         self._stream: sd.InputStream | None = None
 
+        device = None
+        if getattr(self.cfg, "prefer_builtin_mic", True):
+            builtin_dev = find_builtin_input_device()
+            if builtin_dev is not None:
+                device = builtin_dev
+
         try:
             # Persistent 16kHz mono stream; <0.1% CPU when is_recording is unset
             self._stream = sd.InputStream(
@@ -96,6 +124,7 @@ class EarEngine:
                 channels=1,
                 dtype="float32",
                 blocksize=512,
+                device=device,
                 callback=self._mic_callback,
             )
             self._stream.start()
@@ -130,6 +159,7 @@ class EarEngine:
         if not self.mic_available or self.is_recording.is_set():
             return
         self.on_barge_in()  # Flush GaplessSpeaker & cancel in-flight reply (<20ms)
+        self.ensure_model_loaded()  # Speculative warmup while user is speaking
         if self.on_capture_start is not None:
             try:
                 self.on_capture_start()
@@ -281,6 +311,64 @@ class EarEngine:
                     )
             return await asyncio.to_thread(self._transcribe_mlx, audio_f32)
 
+    def set_language_mode(self, mode: str) -> None:
+        """Update active language mode ('en', 'ru', 'auto') dynamically without restart."""
+        cleaned = mode.strip().lower()
+        if cleaned in ("en", "english"):
+            self.language_mode = "en"
+            self.last_detected_lang = "en"
+        elif cleaned in ("ru", "russian"):
+            self.language_mode = "ru"
+            self.last_detected_lang = "ru"
+        elif cleaned == "auto":
+            self.language_mode = "auto"
+
+    def ensure_model_loaded(self) -> None:
+        """Speculatively pre-warm Whisper weights in Unified Memory during PTT key-down."""
+        if self._whisper_model is None:
+            def _preload():
+                from mlx_whisper.load_models import load_model
+                try:
+                    self._whisper_model = load_model(self.cfg.whisper_repo)
+                except Exception as err:
+                    print(f"[EarEngine] Speculative preload warning: {err}", flush=True)
+
+            threading.Thread(target=_preload, daemon=True, name="whisper-preload").start()
+
+    def unload_model(self) -> None:
+        """Evict Whisper model from Unified Memory when idle to reclaim ~464MB RAM."""
+        with self._lock:
+            if self._whisper_model is not None:
+                del self._whisper_model
+                self._whisper_model = None
+        from selene.memory_reclaimer import reclaim_idle_memory
+        reclaim_idle_memory()
+
+    def _detect_en_or_ru(self, audio_f32: np.ndarray) -> str:
+        """Acoustic-only language ID restricted strictly to English vs Russian."""
+        import mlx.core as mx
+        from mlx_whisper.audio import log_mel_spectrogram, pad_or_trim
+        from mlx_whisper.load_models import load_model
+
+        if self._whisper_model is None:
+            self._whisper_model = load_model(self.cfg.whisper_repo)
+
+        mel = log_mel_spectrogram(
+            pad_or_trim(mx.array(audio_f32)), n_mels=self._whisper_model.dims.n_mels
+        )
+        _, probs = self._whisper_model.detect_language(mel)
+        p_en = float(probs.get("en", 0.0))
+        p_ru = float(probs.get("ru", 0.0))
+        total = p_en + p_ru + 1e-9
+        norm_en = p_en / total
+        norm_ru = p_ru / total
+
+        if max(norm_en, norm_ru) < 0.65:
+            return self.last_detected_lang
+        target = "ru" if norm_ru > norm_en else "en"
+        self.last_detected_lang = target
+        return target
+
     def _transcribe_mlx(self, audio_f32: np.ndarray) -> str:
         import mlx.core as mx
         import mlx_whisper
@@ -298,14 +386,34 @@ class EarEngine:
                 _hf_const.HF_HUB_OFFLINE = False
             except Exception:
                 pass
+
+        mode = (self.language_mode or "en").strip().lower()
+        if mode == "auto":
+            try:
+                target_lang = self._detect_en_or_ru(audio_f32)
+            except Exception:
+                target_lang = self.last_detected_lang
+        elif mode in ("ru", "russian"):
+            target_lang = "ru"
+            self.last_detected_lang = "ru"
+        else:
+            target_lang = "en"
+            self.last_detected_lang = "en"
+
+        prompt = WHISPER_PROMPTS.get(target_lang, WHISPER_PROMPTS["en"])
+        kwargs: dict[str, object] = {
+            "path_or_hf_repo": self.cfg.whisper_repo,
+            "fp16": True,
+            "temperature": 0.0,
+            "language": target_lang,
+            "initial_prompt": prompt,
+            "condition_on_previous_text": False,
+        }
+
         try:
             result = mlx_whisper.transcribe(
                 audio_f32,
-                path_or_hf_repo=self.cfg.whisper_repo,
-                fp16=True,
-                temperature=0.0,
-                initial_prompt=self.cfg.whisper_initial_prompt,
-                condition_on_previous_text=False,
+                **kwargs,
             )
         finally:
             if prev_offline is not None:
@@ -326,15 +434,27 @@ class EarEngine:
             wf.setframerate(self.cfg.sample_rate)
             wf.writeframes(pcm16.tobytes())
 
+        mode = (self.language_mode or "en").strip().lower()
+        data: dict[str, str] = {
+            "model": "whisper-large-v3-turbo",
+            "response_format": "text",
+        }
+        if mode == "auto":
+            pass  # Cloud API single-pass auto-detect; omit prompt
+        elif mode in ("ru", "russian"):
+            data["language"] = "ru"
+            data["prompt"] = WHISPER_PROMPTS["ru"]
+            self.last_detected_lang = "ru"
+        else:
+            data["language"] = "en"
+            data["prompt"] = WHISPER_PROMPTS["en"]
+            self.last_detected_lang = "en"
+
         resp = httpx.post(
             "https://api.groq.com/openai/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {os.environ['GROQ_API_KEY']}"},
             files={"file": ("speech.wav", buf.getvalue(), "audio/wav")},
-            data={
-                "model": "whisper-large-v3-turbo",
-                "response_format": "text",
-                "prompt": self.cfg.whisper_initial_prompt,
-            },
+            data=data,
             timeout=8.0,
         )
         resp.raise_for_status()

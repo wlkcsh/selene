@@ -43,7 +43,11 @@ def load_persona(
         "(2 to 4 concise sentences unless teaching a deeper topic). "
         "Avoid raw markdown symbols, asterisks, emojis, code fences, bullet lists, "
         "or narrating tool calls and stage directions like *(Calls ...)* "
-        "so your voice flows naturally."
+        "so your voice flows naturally. "
+        "\n\n[ACTION & TOOL EXECUTION MANDATE]: Whenever the user asks you to take an action "
+        "(play music on Spotify, pause/resume, check/create calendar events, create reminders, "
+        "open apps, inspect screen), YOU MUST TRIGGER THE CORRESPONDING TOOL. "
+        "NEVER claim an action is happening or completed in text without executing the tool function!"
     )
     prompt = base + voice_rules
     if pinned_facts.strip():
@@ -64,5 +68,7 @@ def clean_for_speech(text: str) -> str:
     text = re.sub(r"\*?\([^)]*\)\*?", " ", text)
     text = re.sub(r"[*_`#>~]", "", text)
     text = re.sub(r"[^\w\s.,!?;:'\"-]", "", text)
+    text = re.sub(r",\s*,+", ",", text)
+    text = re.sub(r"\s+([.,!?;:])", r"\1", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
