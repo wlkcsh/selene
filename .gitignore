@@ -12,6 +12,7 @@ build/
 models/
 notes/
 config.toml
+latest_silero_models.yml
 .env
 .env.*
 *.db

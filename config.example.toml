@@ -8,10 +8,13 @@ model_id = "gemini-3.5-flash-lite"
 temperature = 0.75
 
 [voice]
+# Set to true if you have custom RVC v2 .pth voice model weights; otherwise Selene speaks pure Kokoro/Silero with zero checkpoints
+rvc_enabled = false
 tts_backend = "mlx"  # "mlx" (Apple Silicon Metal) or "pytorch" (CPU fallback)
 kokoro_voice = "af_heart"
 kokoro_speed = 1.0
 kokoro_mlx_repo = "mlx-community/Kokoro-82M-bf16"
+russian_speaker = "baya"  # "baya" | "kseniya" | "xenia" (Silero v5 voice)
 rvc_pitch = 0
 rvc_index_rate = 0.75
 rvc_protect = 0.5
@@ -21,12 +24,23 @@ model_workdir = "~/selene/models/custom_voice"
 rvc_model_path = "model.pth"
 rvc_index_path = "model.index"
 
+[languages.ru]
+# Optional character tone guidance for Russian replies (leave empty for neutral assistant)
+# e.g. style_directive = "authentic, idiomatic native Russian as a warm, caring mentor..."
+style_directive = ""
+
+[languages.en]
+# Optional character tone guidance for English replies
+style_directive = ""
+
 [ears]
+prefer_builtin_mic = true  # Always use MacBook built-in mic; prevents Bluetooth earphones switching to low-quality call mode
 sample_rate = 16000
 min_audio_sec = 0.35
 min_rms_energy = 0.004
 whisper_repo = "mlx-community/whisper-large-v3-turbo"
-whisper_initial_prompt = "Привет, Селена. Слушай, открой Safari, терминал, настройки, экран, аккумулятор, звук. Selene, Jarvis, macOS, Apple Silicon, Python, TypeScript, React, FastAPI, Next.js, Tailwind, pnpm, uv, Git, GitHub, VS Code, Kitty, Kokoro, RVC."
+whisper_language = "auto"  # "auto" (default: auto-detect EN/RU), or "en", "ru", etc.
+whisper_initial_prompt = "Selene, Jarvis, macOS, Apple Silicon, Python, TypeScript, React, FastAPI, Next.js, Tailwind, pnpm, uv, Git, GitHub, VS Code, Kitty, Kokoro, RVC, Spotify."
 chime_open_sound = "Tink"
 chime_open_vol = 0.18
 chime_close_sound = "Pop"
@@ -41,6 +55,12 @@ screen_vision_jpeg_quality = 80
 [ipc]
 ipc_enabled = true
 socket_path = "/tmp/selene.sock"
+
+[spotify]
+# Optional: Set client_id and client_secret from developer.spotify.com to resolve exact track URIs.
+# If omitted, Selene automatically resolves tracks via free iTunes Search API with zero credentials!
+client_id = ""
+client_secret = ""
 
 [memory]
 window_size = 16

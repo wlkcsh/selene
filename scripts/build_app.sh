@@ -6,6 +6,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 APP_VERSION="$(grep -m1 '^version = ' "${REPO_ROOT}/pyproject.toml" | cut -d'"' -f2 || echo "2.5.0")"
 
+if [[ -f "${REPO_ROOT}/.env.build" ]]; then
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/.env.build"
+fi
+
 echo "🌸 ============================================="
 echo "   Building Selene Standalone macOS Application"
 echo "   ============================================="
@@ -36,6 +41,12 @@ mkdir -p "${MACOS}" "${RESOURCES}"
 cp "${REPO_ROOT}/hud/.build/release/SeleneHUD" "${MACOS}/Selene"
 chmod +x "${MACOS}/Selene"
 cp "${REPO_ROOT}/AppIcon.icns" "${RESOURCES}/AppIcon.icns"
+
+if [[ -d "${REPO_ROOT}/hud/Resources/Automations" ]]; then
+    echo "📜 Packaging bundled automation scripts..."
+    mkdir -p "${RESOURCES}/Automations"
+    cp -R "${REPO_ROOT}/hud/Resources/Automations/"* "${RESOURCES}/Automations/"
+fi
 
 cat <<EOF > "${CONTENTS}/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
@@ -70,16 +81,34 @@ cat <<EOF > "${CONTENTS}/Info.plist"
     <string>Selene uses local speech recognition to understand your questions.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Selene requires screen recording permission for on-demand vision queries.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>Selene creates and views calendar events on your schedule when you ask.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Selene creates and views calendar events on your schedule with full native access when you ask.</string>
+    <key>NSRemindersUsageDescription</key>
+    <string>Selene creates and views reminders for your tasks when you ask.</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>Selene creates and views reminders for your tasks with full native access when you ask.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Selene uses AppleEvents for system and workspace context.</string>
+    <string>Selene uses macOS Automation to control apps like Spotify, Calendar, Reminders, Notes, and Safari when you ask.</string>
 </dict>
 </plist>
 EOF
 
 echo -n "APPL????" > "${CONTENTS}/PkgInfo"
 
-# Code sign with local ad-hoc identity pinned to stable bundle identifier
-codesign --force --deep --sign - -r='designated => identifier "com.selene.assistant"' "${APP_BUNDLE}"
+# Code sign: prefer stable local developer certificate if present, fallback to ad-hoc
+SIGN_IDENTITY="${SELENE_SIGN_IDENTITY:-Selene Local Dev}"
+if [[ -n "${SIGN_IDENTITY}" ]] && security find-certificate -c "${SIGN_IDENTITY}" >/dev/null 2>&1; then
+    echo "🔐 Signing with stable developer certificate '${SIGN_IDENTITY}'..."
+    codesign --force --deep --options runtime \
+      --sign "${SIGN_IDENTITY}" \
+      --requirements "=designated => identifier \"com.selene.assistant\" and certificate leaf[subject.CN] = \"${SIGN_IDENTITY}\"" \
+      "${APP_BUNDLE}"
+else
+    echo "ℹ️  '${SIGN_IDENTITY}' certificate not found in Keychain; signing ad-hoc..."
+    codesign --force --deep --sign - -r='designated => identifier "com.selene.assistant"' "${APP_BUNDLE}"
+fi
 
 # 4. Install to /Applications (skip if --no-install or NO_INSTALL=1)
 if [[ "${1:-}" == "--no-install" || "${NO_INSTALL:-0}" == "1" ]]; then

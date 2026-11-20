@@ -8,6 +8,8 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
+# Disable artificial MPS memory ceiling so RVC has enough headroom, while empty_cache() frees memory
+os.environ.setdefault("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.0")
 
 import argparse
 import asyncio
@@ -43,6 +45,7 @@ from selene.pipeline import speak_once, stream_and_speak  # noqa: E402
 from selene.slash_commands import handle_slash_command  # noqa: E402
 from selene.study_cards import StudyCardStore  # noqa: E402
 from selene.timers import register_reminder_callback  # noqa: E402
+from selene.voice_router import BilingualTTSRouter  # noqa: E402
 from selene.workspace_context import (  # noqa: E402
     WorkspaceContext,
     capture_workspace_context,
@@ -86,6 +89,8 @@ async def wait_for_event(
     ipc_queue: queue.Queue[tuple[str, object]],
     muted: bool,
     daemon_mode: bool = False,
+    last_active_time: list[float] | None = None,
+    cfg: SeleneConfig | None = None,
 ) -> tuple[str, object]:
     """Non-blocking race between Right-Option PTT voice, timer reminders, IPC commands, and stdin."""
     if not daemon_mode and sys.stdin.isatty():
@@ -100,18 +105,24 @@ async def wait_for_event(
     while True:
         try:
             rem = reminder_queue.get_nowait()
+            if last_active_time:
+                last_active_time[0] = time.time()
             return ("reminder", rem)
         except queue.Empty:
             pass
 
         try:
             cmd = ipc_queue.get_nowait()
+            if last_active_time:
+                last_active_time[0] = time.time()
             return cmd
         except queue.Empty:
             pass
 
         utt = ear.try_get_utterance()
         if utt is not None:
+            if last_active_time:
+                last_active_time[0] = time.time()
             return ("voice", utt)
 
         if not daemon_mode and sys.stdin.isatty():
@@ -129,7 +140,19 @@ async def wait_for_event(
                     or re.match(r"^(\x1b|\^\[)\[\d+;\d+u$", stripped)
                 ):
                     continue
+                if last_active_time:
+                    last_active_time[0] = time.time()
                 return ("text", stripped)
+
+        if (
+            cfg is not None
+            and last_active_time is not None
+            and cfg.stt_idle_unload_sec > 0
+            and getattr(ear, "_whisper_model", None) is not None
+            and (time.time() - last_active_time[0]) > cfg.stt_idle_unload_sec
+        ):
+            ear.unload_model()
+            print("\n💤 [STT] Idle for 180s — Whisper evicted to reclaim Unified Memory", flush=True)
 
         await asyncio.sleep(0.02)
 
@@ -184,23 +207,23 @@ async def main(argv: list[str] | None = None) -> None:
     # Import voice_engine FIRST so faiss loads cleanly before torch on macOS
     from selene.voice_engine import GaplessSpeaker, boot_voice_engines  # isort: skip
     from selene.ear_engine import EarEngine  # isort: skip
+    from selene.memory_reclaimer import configure_mlx_budget, reclaim_idle_memory  # isort: skip
+
+    configure_mlx_budget(cache_limit_mb=getattr(cfg, "mlx_cache_limit_mb", 64))
 
     use_index = not args.fast
     chimes_enabled = not args.no_chimes
     t_boot = time.time()
 
     kokoro, rvc = boot_voice_engines(use_index=use_index, cfg=cfg)
+    voice_router = BilingualTTSRouter(kokoro, russian_speaker=cfg.russian_speaker)
+    voice_router.reply_policy = cfg.reply_policy
+    if cfg.whisper_language in ("ru", "auto"):
+        voice_router.prewarm_silero()
+
     speaker = GaplessSpeaker(rvc.tgt_sr)
     memory = MemoryStore(cfg=cfg)
     study_cards = StudyCardStore(cfg=cfg)
-    tools = build_jarvis_tools(memory, cfg=cfg, study_cards=study_cards)
-
-    main_loop = asyncio.get_running_loop()
-    active_turn: dict[str, asyncio.Task | None] = {"task": None}
-    pending_context: dict[str, WorkspaceContext | None] = {"ctx": None}
-    reminder_queue: queue.Queue[str] = queue.Queue()
-    ipc_queue: queue.Queue[tuple[str, object]] = queue.Queue()
-    register_reminder_callback(reminder_queue.put)
 
     ipc: SeleneIPCServer | None = None
     if cfg.ipc_enabled:
@@ -210,6 +233,13 @@ async def main(argv: list[str] | None = None) -> None:
         except Exception as err:
             print(f"⚠️  HUD IPC server unavailable ({err})", flush=True)
             ipc = None
+
+    main_loop = asyncio.get_running_loop()
+    active_turn: dict[str, asyncio.Task | None] = {"task": None}
+    pending_context: dict[str, WorkspaceContext | None] = {"ctx": None}
+    reminder_queue: queue.Queue[str] = queue.Queue()
+    ipc_queue: queue.Queue[tuple[str, object]] = queue.Queue()
+    register_reminder_callback(reminder_queue.put)
 
     def post_ipc(payload: dict) -> None:
         if ipc is None:
@@ -222,6 +252,43 @@ async def main(argv: list[str] | None = None) -> None:
                 asyncio.run_coroutine_threadsafe(ipc.broadcast(payload), main_loop)
         except RuntimeError:
             asyncio.run_coroutine_threadsafe(ipc.broadcast(payload), main_loop)
+
+    ear: EarEngine | None = None
+
+    state: dict[str, object] = {
+        "muted": False,
+        "mode": "ptt",
+        "language_mode": cfg.whisper_language,
+        "reply_policy": cfg.reply_policy,
+        "voice_router": voice_router,
+        "post_ipc": post_ipc,
+    }
+
+    def handle_tool_lang_change(new_mode: str, new_policy: str) -> None:
+        state["language_mode"] = new_mode
+        state["reply_policy"] = new_policy
+        if ear is not None:
+            ear.set_language_mode(new_mode)
+        if voice_router is not None:
+            voice_router.reply_policy = new_policy
+            if new_mode in ("ru", "auto"):
+                voice_router.prewarm_silero()
+        post_ipc(
+            {
+                "type": "language_state",
+                "mode": new_mode,
+                "reply_policy": new_policy,
+                "last_detected": getattr(ear, "last_detected_lang", "en"),
+            }
+        )
+
+    tools = build_jarvis_tools(
+        memory,
+        cfg=cfg,
+        study_cards=study_cards,
+        ipc_server=ipc,
+        on_language_change=handle_tool_lang_change,
+    )
 
     def handle_barge_in() -> None:
         speaker.interrupt()
@@ -273,8 +340,29 @@ async def main(argv: list[str] | None = None) -> None:
             text = cmd.get("text", "").strip()
             if text and not state.get("muted", False):
                 asyncio.create_task(
-                    speak_once(text, kokoro, rvc, speaker, tts_executor, rvc_executor)
+                    speak_once(text, voice_router, rvc, speaker, tts_executor, rvc_executor)
                 )
+        elif act == "set_language":
+            mode = cmd.get("mode", state.get("language_mode", "en")).strip().lower()
+            policy = cmd.get("reply_policy", state.get("reply_policy", "match")).strip().lower()
+            if mode in ("en", "ru", "auto"):
+                state["language_mode"] = mode
+                if ear is not None:
+                    ear.set_language_mode(mode)
+            if policy in ("match", "force_en"):
+                state["reply_policy"] = policy
+                if voice_router is not None:
+                    voice_router.reply_policy = policy
+            if mode in ("ru", "auto") and voice_router is not None:
+                voice_router.prewarm_silero()
+            post_ipc(
+                {
+                    "type": "language_state",
+                    "mode": state["language_mode"],
+                    "reply_policy": state["reply_policy"],
+                    "last_detected": getattr(ear, "last_detected_lang", "en"),
+                }
+            )
         elif act == "toggle_mute":
             state["muted"] = not state.get("muted", False)
             if ear is not None:
@@ -305,6 +393,14 @@ async def main(argv: list[str] | None = None) -> None:
                     "cards_due": study_cards.due_count(),
                     "muted": state.get("muted", False),
                     "mode": state.get("mode", "ptt"),
+                }
+            )
+            post_ipc(
+                {
+                    "type": "language_state",
+                    "mode": state.get("language_mode", "en"),
+                    "reply_policy": state.get("reply_policy", "match"),
+                    "last_detected": getattr(ear, "last_detected_lang", "en"),
                 }
             )
 
@@ -350,7 +446,6 @@ async def main(argv: list[str] | None = None) -> None:
 
     client = genai.Client()
     chat, n_hist, n_facts, n_due = _create_chat(client, memory, study_cards, tools, cfg)
-    state = {"muted": False}
 
     tts_label = getattr(kokoro, "backend_label", "Kokoro")
     mode_str = "Fast Pure .pth" if not use_index else "Full FAISS"
@@ -375,10 +470,18 @@ async def main(argv: list[str] | None = None) -> None:
     if daemon_mode:
         print("  ✨ Running in background daemon mode (HUD IPC & Global Right Option active)")
 
+    last_active_time = [time.time()]
+
     try:
         while True:
             kind, payload = await wait_for_event(
-                ear, reminder_queue, ipc_queue, state["muted"], daemon_mode=daemon_mode
+                ear,
+                reminder_queue,
+                ipc_queue,
+                state["muted"],
+                daemon_mode=daemon_mode,
+                last_active_time=last_active_time,
+                cfg=cfg,
             )
             if kind in ("eof", "quit"):
                 print("\nSelene: Take good care of yourself, darling~ Goodbye! 💖")
@@ -388,7 +491,7 @@ async def main(argv: list[str] | None = None) -> None:
                 msg = str(payload)
                 print(f"\n⏰ Selene (Reminder): {msg}\n")
                 if not state["muted"]:
-                    await speak_once(msg, kokoro, rvc, speaker, tts_executor, rvc_executor)
+                    await speak_once(msg, voice_router, rvc, speaker, tts_executor, rvc_executor)
                 continue
 
             image_bytes: bytes | None = None
@@ -458,11 +561,34 @@ async def main(argv: list[str] | None = None) -> None:
                 )
                 print(f"\nSelene: {goodbye}\n")
                 if not state["muted"]:
-                    await speak_once(goodbye, kokoro, rvc, speaker, tts_executor, rvc_executor)
+                    await speak_once(goodbye, voice_router, rvc, speaker, tts_executor, rvc_executor)
                 break
 
             if ear is not None:
                 ear.mic_gate_open = False
+
+            detected_lang = getattr(ear, "last_detected_lang", "en") if ear else "en"
+            lang_mode = str(state.get("language_mode", "en"))
+            reply_policy = str(state.get("reply_policy", "match"))
+
+            if reply_policy == "match" and detected_lang == "ru":
+                target_lang_name = "Russian"
+                style = cfg.russian_style_directive.strip()
+            else:
+                target_lang_name = "English"
+                style = cfg.english_style_directive.strip()
+
+            directive_parts = [
+                f"language_mode={lang_mode}",
+                f"stt_detected={detected_lang}",
+                f"reply_policy={reply_policy}",
+                f"-> Respond naturally and idiomatically in {target_lang_name} for spoken audio.",
+            ]
+            if style:
+                directive_parts.append(f"Style guidance: {style}")
+
+            runtime_directive = f"[RUNTIME_DIRECTIVE: {' | '.join(directive_parts)}]\n\n"
+            full_prompt = runtime_directive + prompt_to_send
 
             post_ipc(
                 {
@@ -474,6 +600,9 @@ async def main(argv: list[str] | None = None) -> None:
                     "cards_due": study_cards.due_count(),
                     "muted": state["muted"],
                     "mode": state.get("mode", "ptt"),
+                    "language_mode": lang_mode,
+                    "reply_policy": reply_policy,
+                    "last_detected": detected_lang,
                 }
             )
 
@@ -489,8 +618,8 @@ async def main(argv: list[str] | None = None) -> None:
             turn_task = asyncio.create_task(
                 stream_and_speak(
                     chat,
-                    prompt_to_send,
-                    kokoro,
+                    full_prompt,
+                    voice_router,
                     rvc,
                     speaker,
                     tts_executor,
@@ -524,6 +653,9 @@ async def main(argv: list[str] | None = None) -> None:
                 compact_task = asyncio.create_task(memory.maybe_compact(client, cfg.model_id))
                 bg_tasks.add(compact_task)
                 compact_task.add_done_callback(bg_tasks.discard)
+
+            if getattr(cfg, "turn_end_reclaim", True):
+                reclaim_idle_memory()
     finally:
         register_reminder_callback(None)
         for task in bg_tasks:
