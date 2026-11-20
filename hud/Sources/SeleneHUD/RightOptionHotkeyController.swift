@@ -4,6 +4,7 @@ import ApplicationServices
 @MainActor
 public final class RightOptionHotkeyController {
     private static let rightOptionKeyCode: UInt16 = 61 // kVK_RightOption (0x3D)
+    private static let kVK_ANSI_K: UInt16 = 40 // 'k' key
     private let holdThreshold: TimeInterval = 0.22
     private let doubleTapWindow: TimeInterval = 0.30
 
@@ -17,6 +18,7 @@ public final class RightOptionHotkeyController {
     public var mode: InteractionMode = .ptt
     public var agentState: AgentState = .idle
     public var onSendCommand: ((_ cmd: String, _ payload: [String: String]) -> Void)?
+    public var onQuickInputRequested: (() -> Void)?
 
     public init() {}
 
@@ -58,6 +60,12 @@ public final class RightOptionHotkeyController {
 
     private func handle(_ event: NSEvent) {
         if event.type == .keyDown {
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if flags == [.command, .shift] && event.keyCode == Self.kVK_ANSI_K {
+                onQuickInputRequested?()
+                return
+            }
+
             if isRightOptionDown {
                 wasChording = true
                 onSendCommand?("ptt_cancel", [:])

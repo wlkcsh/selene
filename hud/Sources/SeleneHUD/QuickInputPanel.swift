@@ -9,15 +9,22 @@ public struct QuickInputView: View {
     @FocusState private var isFocused: Bool
 
     public var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.purple)
+        VStack(spacing: 0) {
+            // Main Input Row
+            HStack(spacing: 12) {
+                Image(systemName: "moon.stars.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.purple, .pink],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
 
                 TextField("Ask Selene anything, or type /cards, /screen, /memory...", text: $inputText)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 14, weight: .regular, design: .rounded))
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
                     .focused($isFocused)
                     .onSubmit {
                         submit()
@@ -26,6 +33,7 @@ public struct QuickInputView: View {
                 if !inputText.isEmpty {
                     Button(action: { inputText = "" }) {
                         Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
@@ -33,50 +41,62 @@ public struct QuickInputView: View {
 
                 Button(action: submit) {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(inputText.isEmpty ? Color.secondary : Color.purple)
+                        .font(.system(size: 20))
+                        .foregroundStyle(
+                            inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? Color.secondary.opacity(0.35)
+                                : Color.purple
+                        )
                 }
                 .buttonStyle(.plain)
                 .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.85))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.purple.opacity(0.3), lineWidth: 1)
-            )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
 
-            HStack {
-                Text("Press Return to send • Esc to close")
+            // Subtle Hairline Divider
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 0.5)
+
+            // Footer Telemetry & Shortcuts
+            HStack(spacing: 12) {
+                Text("Press Return ↵ to send • Esc to close")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
+
                 Spacer()
+
                 if viewModel.cardsDue > 0 {
                     Button(action: {
                         viewModel.sendSlash("/cards")
                         onDismiss()
                     }) {
-                        Text("📚 \(viewModel.cardsDue) Cards Due")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.purple)
+                        HStack(spacing: 4) {
+                            Image(systemName: "book.fill")
+                                .font(.system(size: 9))
+                            Text("\(viewModel.cardsDue) Cards Due")
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        }
+                        .foregroundStyle(.purple)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(Color.purple.opacity(0.15), in: Capsule())
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color.black.opacity(0.12))
         }
-        .padding(14)
-        .frame(width: 520)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .frame(width: 540)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.14), lineWidth: 0.5)
         )
-        .shadow(color: .black.opacity(0.25), radius: 20, x: 0, y: 10)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onAppear {
             isFocused = true
         }
@@ -101,8 +121,8 @@ public final class QuickInputPanel: NSPanel {
     public init(viewModel: HUDViewModel) {
         self.viewModel = viewModel
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 90),
-            styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView],
+            contentRect: NSRect(x: 0, y: 0, width: 540, height: 86),
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -111,6 +131,7 @@ public final class QuickInputPanel: NSPanel {
         self.titlebarAppearsTransparent = true
         self.isOpaque = false
         self.backgroundColor = .clear
+        self.hasShadow = true
         self.level = .floating
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         self.isMovableByWindowBackground = true
@@ -119,6 +140,14 @@ public final class QuickInputPanel: NSPanel {
             self?.closePanel()
         }
         self.contentView = NSHostingView(rootView: rootView)
+    }
+
+    public override var canBecomeKey: Bool {
+        return true
+    }
+
+    public override var canBecomeMain: Bool {
+        return true
     }
 
     public override func cancelOperation(_ sender: Any?) {
@@ -132,6 +161,7 @@ public final class QuickInputPanel: NSPanel {
             let y = screenFrame.midY + (screenFrame.height * 0.15)
             self.setFrameOrigin(NSPoint(x: x, y: y))
         }
+        self.invalidateShadow()
         self.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

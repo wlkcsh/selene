@@ -21,6 +21,20 @@ public final class HUDViewModel {
     public var cardsDue: Int = 0
     public var isMuted: Bool = false
     public var isConnected: Bool = false
+    public var languageMode: LanguageMode = .auto {
+        didSet {
+            UserDefaults.standard.set(languageMode.rawValue, forKey: "selene_hud_language_mode")
+        }
+    }
+    public var replyPolicy: ReplyLanguagePolicy = .matchInput
+    public var lastDetectedLanguage: String = "en"
+
+    public var languageBadgeText: String {
+        if languageMode == .auto {
+            return "AUTO • \(lastDetectedLanguage.uppercased())"
+        }
+        return languageMode.badgeTitle
+    }
     public var displayMode: HUDDisplayMode = .notch {
         didSet {
             UserDefaults.standard.set(displayMode.rawValue, forKey: "selene_hud_display_mode")
@@ -41,6 +55,13 @@ public final class HUDViewModel {
             self.displayMode = mode
         } else {
             self.displayMode = .notch
+        }
+
+        if let savedLang = UserDefaults.standard.string(forKey: "selene_hud_language_mode"),
+           let mode = LanguageMode(rawValue: savedLang) {
+            self.languageMode = mode
+        } else {
+            self.languageMode = .auto
         }
 
         self.socketClient = SocketClient(
@@ -124,6 +145,31 @@ public final class HUDViewModel {
         if let muted = event.muted {
             self.isMuted = muted
         }
+        if let rawLang = event.language_mode, let parsed = LanguageMode(rawValue: rawLang) {
+            self.languageMode = parsed
+        }
+        if let rawPolicy = event.reply_policy, let parsed = ReplyLanguagePolicy(rawValue: rawPolicy) {
+            self.replyPolicy = parsed
+        }
+        if let detected = event.last_detected {
+            self.lastDetectedLanguage = detected
+        }
+    }
+
+    public func setLanguageMode(mode: LanguageMode, replyPolicy: ReplyLanguagePolicy? = nil) {
+        performHaptic(.alignment)
+        self.languageMode = mode
+        let policy = replyPolicy ?? self.replyPolicy
+        self.replyPolicy = policy
+        socketClient?.sendCommand(HUDCommand(
+            cmd: "set_language",
+            mode: mode.rawValue,
+            reply_policy: policy.rawValue
+        ))
+    }
+
+    public func cycleLanguageMode() {
+        setLanguageMode(mode: languageMode.nextMode)
     }
 
     public func interrupt() {

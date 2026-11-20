@@ -82,17 +82,27 @@ public final class DaemonManager {
         return nil
     }
 
+    private func killStaleDaemon() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        task.arguments = ["-9", "-f", "selene-voice.*--daemon"]
+        try? task.run()
+        task.waitUntilExit()
+
+        let sock = "/tmp/selene.sock"
+        if FileManager.default.fileExists(atPath: sock) {
+            try? FileManager.default.removeItem(atPath: sock)
+        }
+    }
+
     public func startDaemon() {
         guard process == nil || !(process?.isRunning ?? false) else {
             status = .running
             return
         }
 
-        guard let uvURL = findUvBinary() else {
-            lastError = "Could not find 'uv' binary in standard paths (/opt/homebrew/bin/uv, ~/.cargo/bin/uv)."
-            status = .error
-            return
-        }
+        // Clean up any stale zombie instances first to guarantee zero memory leaks
+        killStaleDaemon()
 
         guard FileManager.default.fileExists(atPath: projectPath) else {
             lastError = "Selene project directory not found at \(projectPath)."
@@ -129,8 +139,19 @@ public final class DaemonManager {
         }
 
         let proc = Process()
-        proc.executableURL = uvURL
-        proc.arguments = ["run", "--project", projectPath, "selene-voice", "--fast", "--daemon"]
+        let venvBin = URL(fileURLWithPath: projectPath).appendingPathComponent(".venv/bin/selene-voice")
+        if FileManager.default.isExecutableFile(atPath: venvBin.path) {
+            proc.executableURL = venvBin
+            proc.arguments = ["--fast", "--daemon"]
+        } else if let uvURL = findUvBinary() {
+            proc.executableURL = uvURL
+            proc.arguments = ["run", "--no-sync", "--project", projectPath, "selene-voice", "--fast", "--daemon"]
+        } else {
+            lastError = "Could not find '.venv/bin/selene-voice' or 'uv'."
+            status = .error
+            return
+        }
+
         proc.currentDirectoryURL = URL(fileURLWithPath: projectPath)
         proc.environment = env
 
@@ -162,13 +183,10 @@ public final class DaemonManager {
     }
 
     public func stopDaemon() {
-        guard let proc = process, proc.isRunning else {
-            status = .stopped
-            process = nil
-            return
+        if let proc = process, proc.isRunning {
+            proc.terminate()
         }
-
-        proc.terminate()
+        killStaleDaemon()
         process = nil
         status = .stopped
     }

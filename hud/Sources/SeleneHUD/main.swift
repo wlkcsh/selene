@@ -28,6 +28,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyController.onSendCommand = { [weak self] cmd, payload in
             self?.viewModel.sendRawCommand(cmd, payload: payload)
         }
+        hotkeyController.onQuickInputRequested = { [weak self] in
+            self?.quickInputPanel.showPanel()
+        }
         hotkeyController.start()
 
         viewModel.onConnectionChange = { [weak self] _ in
@@ -50,6 +53,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 MainActor.assumeIsolated {
+    let myBundleID = Bundle.main.bundleIdentifier ?? "com.selene.assistant"
+    let currentPID = ProcessInfo.processInfo.processIdentifier
+    let existing = NSRunningApplication.runningApplications(withBundleIdentifier: myBundleID)
+        .filter { $0.processIdentifier != currentPID }
+
+    if !existing.isEmpty {
+        // Another instance of Selene is already active; exit cleanly to prevent duplicates
+        exit(0)
+    }
+
     let app = NSApplication.shared
     let delegate = AppDelegate()
     app.delegate = delegate

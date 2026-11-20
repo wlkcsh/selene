@@ -61,8 +61,9 @@ public struct HUDView: View {
                                 .foregroundStyle(.red.opacity(0.85))
                         }
                         if model.interactionMode == .handsFree {
-                            Text("🎙️")
+                            Image(systemName: "mic.fill")
                                 .font(.system(size: 9))
+                                .foregroundStyle(.green)
                         }
                     }
                     .padding(.leading, 12)
@@ -83,12 +84,25 @@ public struct HUDView: View {
                             .buttonStyle(.plain)
                             .help("Expand Transcript")
                         } else if model.cardsDue > 0 {
-                            Text("📚 \(model.cardsDue)")
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.purple)
+                            HStack(spacing: 3) {
+                                Image(systemName: "book.fill")
+                                    .font(.system(size: 9))
+                                Text("\(model.cardsDue)")
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            }
+                            .foregroundStyle(.purple)
                         } else {
-                            // Symmetrical balance spacer matching left ear icon width
-                            Color.clear.frame(width: 22, height: 18)
+                            // Symmetrical balance spacer or compact language chip
+                            Button(action: { model.cycleLanguageMode() }) {
+                                Text(model.languageMode.badgeTitle)
+                                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Color.white.opacity(0.12), in: Capsule())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Language Mode: \(model.languageMode.menuTitle) (Click to cycle)")
                         }
                     }
                     .padding(.leading, 6)
@@ -105,7 +119,9 @@ public struct HUDView: View {
                     // State & Content Pill
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
-                            if !statusTitle.isEmpty {
+                            if model.agentState == .thinking {
+                                ThinkingStatusView()
+                            } else if !statusTitle.isEmpty {
                                 Text(statusTitle)
                                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                                     .foregroundStyle(statusColor)
@@ -113,13 +129,17 @@ public struct HUDView: View {
                             }
 
                             if model.interactionMode == .handsFree {
-                                Text("🎙️ Hands-Free")
-                                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 1)
-                                    .background(Color.green.opacity(0.2), in: Capsule())
-                                    .foregroundStyle(.green)
-                                    .fixedSize(horizontal: true, vertical: false)
+                                HStack(spacing: 3) {
+                                    Image(systemName: "mic.fill")
+                                        .font(.system(size: 8))
+                                    Text("Hands-Free")
+                                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                }
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.green.opacity(0.2), in: Capsule())
+                                .foregroundStyle(.green)
+                                .fixedSize(horizontal: true, vertical: false)
                             }
 
                             if !model.activeApp.isEmpty && model.agentState != .idle {
@@ -131,13 +151,17 @@ public struct HUDView: View {
                             }
 
                             if model.cardsDue > 0 && model.agentState == .idle {
-                                Text("📚 \(model.cardsDue)")
-                                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 1)
-                                    .background(Color.purple.opacity(0.2), in: Capsule())
-                                    .foregroundStyle(.purple)
-                                    .fixedSize(horizontal: true, vertical: false)
+                                HStack(spacing: 3) {
+                                    Image(systemName: "book.fill")
+                                        .font(.system(size: 8))
+                                    Text("\(model.cardsDue)")
+                                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                                }
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.purple.opacity(0.2), in: Capsule())
+                                .foregroundStyle(.purple)
+                                .fixedSize(horizontal: true, vertical: false)
                             }
 
                             if model.isMuted {
@@ -165,6 +189,17 @@ public struct HUDView: View {
 
                     // Action controls sitting neatly beside content
                     HStack(spacing: 8) {
+                        Button(action: { model.cycleLanguageMode() }) {
+                            Text(model.languageBadgeText)
+                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Color.white.opacity(0.12), in: Capsule())
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Language Mode: \(model.languageMode.menuTitle) (Click to cycle)")
+
                         // Expandable Transcript Wing Toggle
                         if !model.streamingMarkdown.isEmpty {
                             Button(action: { model.toggleWing() }) {
@@ -301,23 +336,72 @@ public struct HUDView: View {
 
     @ViewBuilder
     private var backgroundShape: some View {
+        let isThinking = model.agentState == .thinking
         if isNotchMode {
-            NotchShape(topCornerRadius: 6, bottomCornerRadius: isIdleNotch ? 12 : 18)
-                .fill(Color.black)
-                .overlay(alignment: .top) {
-                    Rectangle()
+            if isThinking {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                    let time = context.date.timeIntervalSinceReferenceDate
+                    let pulse = (sin(time * 3.2) + 1.0) / 2.0
+
+                    NotchShape(topCornerRadius: 6, bottomCornerRadius: isIdleNotch ? 12 : 18)
                         .fill(Color.black)
-                        .frame(height: 6)
+                        .overlay(alignment: .top) {
+                            Rectangle()
+                                .fill(Color.black)
+                                .frame(height: 6)
+                        }
+                        .overlay {
+                            NotchShape(topCornerRadius: 6, bottomCornerRadius: isIdleNotch ? 12 : 18)
+                                .strokeBorder(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.clear,
+                                            Color(red: 0.98, green: 0.65, blue: 0.14).opacity(0.20 + pulse * 0.35),
+                                            Color(red: 1.0, green: 0.78, blue: 0.32).opacity(0.35 + pulse * 0.35),
+                                            Color(red: 0.98, green: 0.65, blue: 0.14).opacity(0.20 + pulse * 0.35),
+                                            Color.clear
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 0.75
+                                )
+                        }
+                        .shadow(
+                            color: Color(red: 0.98, green: 0.65, blue: 0.14).opacity(0.18 + pulse * 0.16),
+                            radius: isIdleNotch ? 8 : 14,
+                            x: 0,
+                            y: isIdleNotch ? 2 : 4
+                        )
                 }
-                .shadow(color: Color.black.opacity(isIdleNotch ? 0.25 : 0.4), radius: isIdleNotch ? 4 : 10, x: 0, y: isIdleNotch ? 2 : 4)
+            } else {
+                NotchShape(topCornerRadius: 6, bottomCornerRadius: isIdleNotch ? 12 : 18)
+                    .fill(Color.black)
+                    .overlay(alignment: .top) {
+                        Rectangle()
+                            .fill(Color.black)
+                            .frame(height: 6)
+                    }
+                    .shadow(color: Color.black.opacity(isIdleNotch ? 0.25 : 0.4), radius: isIdleNotch ? 4 : 10, x: 0, y: isIdleNotch ? 2 : 4)
+            }
         } else {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.75)
+                        .strokeBorder(
+                            isThinking
+                                ? Color(red: 0.98, green: 0.65, blue: 0.14).opacity(0.55)
+                                : Color.white.opacity(0.18),
+                            lineWidth: isThinking ? 1.0 : 0.75
+                        )
                 )
-                .shadow(color: Color.black.opacity(0.28), radius: 12, x: 0, y: 4)
+                .shadow(
+                    color: isThinking ? Color(red: 0.98, green: 0.65, blue: 0.14).opacity(0.25) : Color.black.opacity(0.28),
+                    radius: isThinking ? 14 : 12,
+                    x: 0,
+                    y: 4
+                )
         }
     }
 
@@ -338,6 +422,26 @@ public struct HUDView: View {
         case .thinking: return Color(red: 0.96, green: 0.65, blue: 0.14)
         case .speaking: return Color(red: 0.98, green: 0.35, blue: 0.65)
         case .disconnected: return Color.secondary
+        }
+    }
+}
+
+public struct ThinkingStatusView: View {
+    public var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            let pulse = (sin(time * 3.5) + 1.0) / 2.0
+            let dotCount = (Int(time * 2.8) % 3) + 1
+            let dots = String(repeating: ".", count: dotCount)
+
+            Text("Thinking\(dots)")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(
+                    Color(red: 0.98, green: 0.65, blue: 0.14)
+                        .opacity(0.78 + pulse * 0.22)
+                )
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 68, alignment: .leading)
         }
     }
 }

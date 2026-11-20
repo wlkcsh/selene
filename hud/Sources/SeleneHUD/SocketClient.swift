@@ -10,6 +10,7 @@ public final class SocketClient: @unchecked Sendable {
     private var isRunning = false
     private var currentFd: Int32 = -1
     private let lock = NSLock()
+    private let automationRouter = AutomationRouter()
 
     public init(
         socketPath: String = "/tmp/selene.sock",
@@ -123,7 +124,24 @@ public final class SocketClient: @unchecked Sendable {
                     let lineData = buffer.subdata(in: 0..<newlineIdx)
                     buffer.removeSubrange(0...newlineIdx)
 
-                    if let event = try? decoder.decode(HUDEvent.self, from: lineData) {
+                    if let rawDict = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                       rawDict["type"] as? String == "automate",
+                       let req = try? decoder.decode(AutomationRequest.self, from: lineData) {
+                        Task { [weak self] in
+                            guard let self = self else { return }
+                            let res = await self.automationRouter.handle(req)
+                            let reply = HUDCommand(
+                                cmd: "rpc_reply",
+                                req_id: res.reqId,
+                                reqId: res.reqId,
+                                ok: res.ok,
+                                output: res.output,
+                                error_code: res.errorCode,
+                                error_message: res.errorMessage
+                            )
+                            self.sendCommand(reply)
+                        }
+                    } else if let event = try? decoder.decode(HUDEvent.self, from: lineData) {
                         Task { @MainActor in
                             self.onEvent(event)
                         }
